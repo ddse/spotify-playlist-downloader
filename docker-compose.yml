@@ -15,7 +15,7 @@ services:
     volumes:
       - ${MUSIC_DIR}:/music
       - ./state:/state
-    depends_on: [worker, scheduler, metube]
+    depends_on: [metube]
 
   worker:
     build: ./worker
@@ -37,11 +37,11 @@ services:
     environment:
       TZ: ${TZ:-Asia/Tokyo}
       DB_PATH: /state/app.db
-      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID}
-      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET}
+      SYNC_ENDPOINT: http://web:8080
       SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-30}
     volumes:
       - ./state:/state
+    depends_on: [web]
 
   metube:
     image: alexta69/metube:latest
