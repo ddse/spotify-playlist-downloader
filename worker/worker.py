@@ -7,8 +7,12 @@ def conn():
 
 def init(c):
     c.execute('''CREATE TABLE IF NOT EXISTS tracks(spotify_id TEXT PRIMARY KEY,title TEXT NOT NULL,artists TEXT NOT NULL,album TEXT,spotify_url TEXT,status TEXT NOT NULL DEFAULT 'queued',progress INTEGER DEFAULT 0,error TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS service_heartbeat(service TEXT PRIMARY KEY,heartbeat REAL NOT NULL,detail TEXT)''')
     if 'progress' not in {r[1] for r in c.execute('PRAGMA table_info(tracks)').fetchall()}: c.execute('ALTER TABLE tracks ADD COLUMN progress INTEGER DEFAULT 0')
     c.commit()
+
+def heartbeat(c, detail='idle'):
+    c.execute('INSERT INTO service_heartbeat(service,heartbeat,detail) VALUES(?,?,?) ON CONFLICT(service) DO UPDATE SET heartbeat=excluded.heartbeat,detail=excluded.detail',('worker',time.time(),detail)); c.commit()
 
 def run(row):
     Path(MUSIC_DIR).mkdir(parents=True,exist_ok=True)
@@ -21,17 +25,19 @@ def pct(line):
 
 while True:
     try:
-        c=conn(); init(c); row=c.execute("SELECT * FROM tracks WHERE status='queued' ORDER BY created_at LIMIT 1").fetchone()
-        if not row: c.close(); time.sleep(5); continue
-        c.execute("UPDATE tracks SET status='downloading',progress=1,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",(row['spotify_id'],)); c.commit()
+        c=conn(); init(c); heartbeat(c)
+        row=c.execute("SELECT * FROM tracks WHERE status='queued' ORDER BY created_at LIMIT 1").fetchone()
+        if not row: c.close(); time.sleep(3); continue
+        c.execute("UPDATE tracks SET status='downloading',progress=1,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",(row['spotify_id'],)); c.commit(); heartbeat(c,'downloading:'+row['spotify_id'])
         try:
-            p=run(row); output=[]
+            p=run(row); output=[]; last_hb=time.time()
             for line in p.stdout:
                 output.append(line); n=pct(line)
                 if n is not None: c.execute('UPDATE tracks SET progress=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',(n,row['spotify_id'])); c.commit()
+                if time.time()-last_hb >= 2: heartbeat(c,'downloading:'+row['spotify_id']); last_hb=time.time()
             rc=p.wait(timeout=3600)
             if rc==0: c.execute("UPDATE tracks SET status='completed',progress=100,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",(row['spotify_id'],))
             else: c.execute("UPDATE tracks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",(''.join(output)[-4000:],row['spotify_id']))
         except Exception as e: c.execute("UPDATE tracks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",(str(e),row['spotify_id']))
-        c.commit(); c.close()
+        c.commit(); heartbeat(c,'idle'); c.close()
     except Exception: time.sleep(10)
