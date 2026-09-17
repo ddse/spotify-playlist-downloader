@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spotify Downloader</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:1100px;margin:auto;padding:18px;background:#111;color:#eee}input,button{font:inherit;padding:10px;border-radius:8px;border:1px solid #444}input{background:#1b1b1b;color:#fff;width:min(650px,100%)}button{cursor:pointer;background:#eee;color:#111}.search{display:flex;gap:8px;flex-wrap:wrap}.card{display:flex;gap:12px;align-items:center;padding:10px;margin:8px 0;background:#1b1b1b;border-radius:10px}.card img{width:64px;height:64px;object-fit:cover;border-radius:6px}.meta{flex:1}.muted{color:#aaa;font-size:.9em}.section{margin-top:28px}.row{display:flex;gap:8px;flex-wrap:wrap}a{color:#9bd;text-decoration:none}
+</style>
+</head>
+<body>
+<h1>Spotify Downloader</h1>
+<p class="muted">Spotify search → queue → spotDL → OMV Music. MeTube remains available for direct YouTube downloads.</p>
+<div class="search"><input id="q" placeholder="曲名 / アーティスト / アルバム"><button onclick="search()">検索</button><a href="/metube"><button>MeTube</button></a></div>
+<div id="results"></div>
+<div class="section"><h2>Spotify Playlist</h2><form class="row" method="post" action="/api/playlists"><input name="url" placeholder="https://open.spotify.com/playlist/..." required><button>Playlist追加</button></form></div>
+<div class="section"><h2>Queue / History</h2>
+{% for t in tracks %}<div class="card"><div class="meta"><b>{{t['title']}}</b><br>{{t['artists']}}{% if t['album'] %} · {{t['album']}}{% endif %}<br><span class="muted">{{t['status']}}</span></div></div>{% else %}<p class="muted">Queue is empty.</p>{% endfor %}</div>
+<script>
+async function search(){const q=document.getElementById('q').value;const box=document.getElementById('results');box.innerHTML='Searching...';const r=await fetch('/api/search?q='+encodeURIComponent(q));const d=await r.json();box.innerHTML='';if(d.error){box.textContent=d.error;return}d.items.forEach(x=>{const el=document.createElement('div');el.className='card';el.innerHTML=`${x.image?`<img src="${x.image}">`:''}<div class="meta"><b>${esc(x.title)}</b><br>${esc(x.artists)} · ${esc(x.album)}<br><span class="muted">Spotify</span></div><form method="post" action="/api/download"><input type="hidden" name="spotify_id" value="${esc(x.id)}"><input type="hidden" name="title" value="${esc(x.title)}"><input type="hidden" name="artists" value="${esc(x.artists)}"><input type="hidden" name="album" value="${esc(x.album)}"><input type="hidden" name="url" value="${esc(x.url)}"><button>Download</button></form>`;box.appendChild(el)})}
+function esc(s){return String(s).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\\':'&#92;','"':'&quot;'}[c]))}
+</script>
+</body></html>
