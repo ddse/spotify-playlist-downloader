@@ -1,10 +1,11 @@
 import os, re, sqlite3, secrets, time
+import httpx
 from fastapi import FastAPI, Form, Request, Header, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from spotify import authorize_url, exchange, access_token, public_search, playlist_items, playlist_info
 
-DB_PATH=os.getenv('DB_PATH','/state/app.db'); METUBE_URL=os.getenv('METUBE_URL','http://metube:8081'); SYNC_TOKEN=os.getenv('SYNC_TOKEN','')
+DB_PATH=os.getenv('DB_PATH','/state/app.db'); METUBE_URL=os.getenv('METUBE_URL','http://metube:8081'); METUBE_PUBLIC_URL=os.getenv('METUBE_PUBLIC_URL','http://localhost:8081'); SYNC_TOKEN=os.getenv('SYNC_TOKEN','')
 app=FastAPI(title='Spotify Playlist Downloader v2'); templates=Jinja2Templates(directory='templates')
 
 def db():
@@ -35,9 +36,13 @@ def index(request:Request):
 async def health(): return {'ok':True}
 
 @app.get('/api/health')
-async def health():
+async def api_health():
     c=db(); w=worker_state(c,'worker'); s=worker_state(c,'scheduler'); c.close()
     return {'ok':True,'spotify_connected':bool(await access_token()),'worker':w,'scheduler':s}
+
+@app.get('/api/services')
+def services():
+    c=db(); result={k:worker_state(c,k) for k in ('worker','scheduler')}; c.close(); return result
 
 @app.get('/api/spotify/login')
 def spotify_login(): return RedirectResponse(authorize_url())
@@ -70,7 +75,7 @@ def retry(spotify_id:str):
 
 @app.delete('/api/queue/{spotify_id}')
 def delete_queue(spotify_id:str):
-    c=db(); c.execute("DELETE FROM tracks WHERE spotify_id=? AND status IN ('queued','failed')",(spotify_id,)); changed=c.total_changes; c.commit(); c.close(); return {'ok':changed>0}
+    c=db(); cur=c.execute("DELETE FROM tracks WHERE spotify_id=? AND status IN ('queued','failed')",(spotify_id,)); c.commit(); c.close(); return {'ok':cur.rowcount>0}
 
 @app.post('/api/playlists')
 async def add_playlist(url:str=Form(...)):
@@ -86,8 +91,7 @@ async def sync_playlist(playlist_id:str,x_sync_token:str=Header(default='')):
     try:
         tracks=await playlist_items(playlist_id); c=db(); added=0
         for t in tracks:
-            cur=c.execute("INSERT OR IGNORE INTO tracks(spotify_id,title,artists,album,spotify_url,status,progress) VALUES(?,?,?,?,?,'queued',0)",(t['id'],t['name'],', '.join(a['name'] for a in t['artists']),t['album']['name'],t['external_urls']['spotify']))
-            added += cur.rowcount
+            cur=c.execute("INSERT OR IGNORE INTO tracks(spotify_id,title,artists,album,spotify_url,status,progress) VALUES(?,?,?,?,?,'queued',0)",(t['id'],t['name'],', '.join(a['name'] for a in t['artists']),t['album']['name'],t['external_urls']['spotify'])); added+=cur.rowcount
         c.execute("UPDATE playlists SET last_sync=CURRENT_TIMESTAMP WHERE spotify_id=?",(playlist_id,)); c.commit(); c.close(); return {'ok':True,'added':added,'total':len(tracks)}
     except PermissionError as e: return {'ok':False,'error':str(e)}
     except Exception as e: return {'ok':False,'error':str(e)}
@@ -100,17 +104,27 @@ def delete_playlist(playlist_id:str):
 def toggle_playlist(playlist_id:str):
     c=db(); c.execute('UPDATE playlists SET enabled=CASE enabled WHEN 1 THEN 0 ELSE 1 END WHERE spotify_id=?',(playlist_id,)); row=c.execute('SELECT enabled FROM playlists WHERE spotify_id=?',(playlist_id,)).fetchone(); c.commit(); c.close(); return {'ok':row is not None,'enabled':bool(row['enabled']) if row else False}
 
+@app.get('/api/playlists')
+def playlists():
+    c=db(); rows=c.execute('SELECT * FROM playlists ORDER BY name').fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
+
 @app.get('/api/jobs')
 def jobs():
-    c=db(); rows=c.execute('SELECT spotify_id,title,artists,status,progress,error,updated_at,created_at FROM tracks ORDER BY CASE status WHEN \'downloading\' THEN 0 WHEN \'queued\' THEN 1 WHEN \'failed\' THEN 2 ELSE 3 END,updated_at DESC LIMIT 100').fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
+    c=db(); rows=c.execute("SELECT spotify_id,title,artists,status,progress,error,updated_at,created_at FROM tracks ORDER BY CASE status WHEN 'downloading' THEN 0 WHEN 'queued' THEN 1 WHEN 'failed' THEN 2 ELSE 3 END,updated_at DESC LIMIT 100").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
 
 @app.get('/api/history')
 def history():
     c=db(); rows=c.execute("SELECT spotify_id,title,artists,album,status,progress,error,updated_at,created_at FROM tracks WHERE status IN ('completed','failed') ORDER BY updated_at DESC LIMIT 200").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
 
-@app.get('/api/services')
-def services():
-    c=db(); result={k:worker_state(c,k) for k in ('worker','scheduler')}; c.close(); return result
+@app.post('/api/metube')
+async def metube_add(url:str=Form(...)):
+    payload={'url':url,'download_type':'audio','codec':'auto','format':'mp3','quality':'best','auto_start':True}
+    async with httpx.AsyncClient(timeout=20) as client:
+        try:
+            r=await client.post(f'{METUBE_URL}/add',json=payload); r.raise_for_status()
+        except httpx.HTTPError as e:
+            return {'ok':False,'error':str(e)}
+    return {'ok':True,'result':r.json() if r.content else None}
 
 @app.get('/metube')
-def metube_redirect(): return RedirectResponse(METUBE_URL)
+def metube_redirect(): return RedirectResponse(METUBE_PUBLIC_URL)
