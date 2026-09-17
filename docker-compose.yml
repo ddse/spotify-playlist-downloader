@@ -12,6 +12,7 @@ services:
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID}
       SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET}
       SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI}
+      SYNC_TOKEN: ${SYNC_TOKEN}
     volumes:
       - ${MUSIC_DIR}:/music
       - ./state:/state
@@ -38,6 +39,7 @@ services:
       TZ: ${TZ:-Asia/Tokyo}
       DB_PATH: /state/app.db
       SYNC_ENDPOINT: http://web:8080
+      SYNC_TOKEN: ${SYNC_TOKEN}
       SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-30}
     volumes:
       - ./state:/state
