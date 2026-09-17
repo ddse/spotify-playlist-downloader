@@ -15,9 +15,7 @@ services:
     volumes:
       - ${MUSIC_DIR}:/music
       - ./state:/state
-    depends_on:
-      - worker
-      - metube
+    depends_on: [worker, scheduler, metube]
 
   worker:
     build: ./worker
@@ -30,6 +28,19 @@ services:
       AUDIO_BITRATE: ${AUDIO_BITRATE:-320k}
     volumes:
       - ${MUSIC_DIR}:/music
+      - ./state:/state
+
+  scheduler:
+    build: ./worker
+    command: ["python", "scheduler.py"]
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Tokyo}
+      DB_PATH: /state/app.db
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET}
+      SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-30}
+    volumes:
       - ./state:/state
 
   metube:
