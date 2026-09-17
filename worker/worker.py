@@ -6,9 +6,12 @@ def conn():
     c=sqlite3.connect(DB_PATH,timeout=30); c.row_factory=sqlite3.Row; return c
 
 def init(c):
-    c.execute('''CREATE TABLE IF NOT EXISTS tracks(spotify_id TEXT PRIMARY KEY,title TEXT NOT NULL,artists TEXT NOT NULL,album TEXT,spotify_url TEXT,status TEXT NOT NULL DEFAULT 'queued',progress INTEGER DEFAULT 0,error TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS tracks(spotify_id TEXT PRIMARY KEY,title TEXT NOT NULL,artists TEXT NOT NULL,album TEXT,status TEXT NOT NULL DEFAULT 'pending_source',progress INTEGER DEFAULT 0,error TEXT,source_type TEXT DEFAULT 'youtube',source_url TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
     c.execute('''CREATE TABLE IF NOT EXISTS service_heartbeat(service TEXT PRIMARY KEY,heartbeat REAL NOT NULL,detail TEXT)''')
-    if 'progress' not in {r[1] for r in c.execute('PRAGMA table_info(tracks)').fetchall()}: c.execute('ALTER TABLE tracks ADD COLUMN progress INTEGER DEFAULT 0')
+    cols={r[1] for r in c.execute('PRAGMA table_info(tracks)').fetchall()}
+    if 'source_type' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN source_type TEXT DEFAULT 'spotify'")
+    if 'source_url' not in cols: c.execute('ALTER TABLE tracks ADD COLUMN source_url TEXT')
+    if 'progress' not in cols: c.execute('ALTER TABLE tracks ADD COLUMN progress INTEGER DEFAULT 0')
     c.commit()
 
 def heartbeat(c, detail='idle'):
@@ -16,26 +19,33 @@ def heartbeat(c, detail='idle'):
 
 def run(row):
     Path(MUSIC_DIR).mkdir(parents=True,exist_ok=True)
-    cmd=['spotdl','download',row['spotify_url'],'--output',f'{MUSIC_DIR}/{{artist}}/{{album}}/{{track-number}} - {{title}}.{{output-ext}}','--format',FMT]
-    if FMT in ('mp3','m4a','opus','flac'): cmd += ['--bitrate',BITRATE]
+    url=row['source_url']
+    if not url: raise RuntimeError('No download source selected')
+    out=f'{MUSIC_DIR}/%(uploader,artist)s/%(album,playlist)s/%(playlist_index&{} - |)s%(title)s.%(ext)s'
+    cmd=['yt-dlp',url,'--newline','--no-part','--restrict-filenames','-x','--audio-format',FMT,'--audio-quality',BITRATE,'-o',out]
     return subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1)
 
 def pct(line):
-    m=re.search(r'(\d{1,3})%',line); return max(0,min(100,int(m.group(1)))) if m else None
+    m=re.search(r'(\d{1,3}(?:\.\d+)?)%',line)
+    return max(0,min(100,int(float(m.group(1))))) if m else None
 
 while True:
     try:
         c=conn(); init(c); heartbeat(c)
-        row=c.execute("SELECT * FROM tracks WHERE status='queued' ORDER BY created_at LIMIT 1").fetchone()
+        row=c.execute("SELECT * FROM tracks WHERE status='queued' AND source_url IS NOT NULL ORDER BY created_at LIMIT 1").fetchone()
         if not row: c.close(); time.sleep(3); continue
         c.execute("UPDATE tracks SET status='downloading',progress=1,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",(row['spotify_id'],)); c.commit(); heartbeat(c,'downloading:'+row['spotify_id'])
         try:
             p=run(row); output=[]; last_hb=time.time()
-            for line in p.stdout:
-                output.append(line); n=pct(line)
-                if n is not None: c.execute('UPDATE tracks SET progress=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',(n,row['spotify_id'])); c.commit()
+            while True:
+                line=p.stdout.readline()
+                if line:
+                    output.append(line); n=pct(line)
+                    if n is not None: c.execute('UPDATE tracks SET progress=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',(n,row['spotify_id'])); c.commit()
+                elif p.poll() is not None:
+                    break
                 if time.time()-last_hb >= 2: heartbeat(c,'downloading:'+row['spotify_id']); last_hb=time.time()
-            rc=p.wait(timeout=3600)
+            rc=p.wait(timeout=30)
             if rc==0: c.execute("UPDATE tracks SET status='completed',progress=100,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",(row['spotify_id'],))
             else: c.execute("UPDATE tracks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",(''.join(output)[-4000:],row['spotify_id']))
         except Exception as e: c.execute("UPDATE tracks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",(str(e),row['spotify_id']))
