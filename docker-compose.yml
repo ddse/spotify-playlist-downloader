@@ -1,0 +1,44 @@
+services:
+  web:
+    build: ./web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8088}:8080"
+    environment:
+      TZ: ${TZ:-Asia/Tokyo}
+      DB_PATH: /state/app.db
+      MUSIC_DIR: /music
+      METUBE_URL: http://metube:8081
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET}
+      SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI}
+    volumes:
+      - ${MUSIC_DIR}:/music
+      - ./state:/state
+    depends_on:
+      - worker
+      - metube
+
+  worker:
+    build: ./worker
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Tokyo}
+      DB_PATH: /state/app.db
+      MUSIC_DIR: /music
+      AUDIO_FORMAT: ${AUDIO_FORMAT:-mp3}
+      AUDIO_BITRATE: ${AUDIO_BITRATE:-320k}
+    volumes:
+      - ${MUSIC_DIR}:/music
+      - ./state:/state
+
+  metube:
+    image: alexta69/metube:latest
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Tokyo}
+      DOWNLOAD_DIR: /downloads
+    ports:
+      - "${METUBE_PORT:-8081}:8081"
+    volumes:
+      - ${MUSIC_DIR}:/downloads
