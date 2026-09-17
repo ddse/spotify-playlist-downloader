@@ -40,7 +40,6 @@ def init(c):
     if 'progress' not in cols:
         c.execute("ALTER TABLE tracks ADD COLUMN progress INTEGER DEFAULT 0")
 
-    # A worker restart must not leave an interrupted job permanently stuck.
     c.execute("""
         UPDATE tracks
         SET status='queued', progress=0, error=NULL, updated_at=CURRENT_TIMESTAMP
@@ -78,8 +77,9 @@ def download(row, c, track_id):
     def progress_hook(data):
         nonlocal last_progress, last_heartbeat
         now = time.time()
+        status = data.get('status')
 
-        if data.get('status') == 'downloading':
+        if status == 'downloading':
             total = data.get('total_bytes') or data.get('total_bytes_estimate')
             downloaded = data.get('downloaded_bytes', 0)
             percent = int(downloaded * 100 / total) if total else 1
@@ -96,7 +96,7 @@ def download(row, c, track_id):
                 heartbeat(c, 'downloading:' + track_id)
                 last_heartbeat = now
 
-        elif data.get('status') == 'finished':
+        elif status == 'finished':
             c.execute(
                 'UPDATE tracks SET progress=99,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
                 (track_id,),
@@ -105,10 +105,12 @@ def download(row, c, track_id):
             heartbeat(c, 'postprocessing:' + track_id)
 
     opts = {
-        'format': 'bestaudio/best',
+        # Do not force bestaudio/best here. YouTube can expose different
+        # format sets depending on the player client; yt-dlp's own default
+        # selector has the correct fallback behavior.
         'outtmpl': output,
         'noplaylist': True,
-        'quiet': True,
+        'quiet': False,
         'no_warnings': False,
         'progress_hooks': [progress_hook],
         'postprocessors': [{
@@ -126,6 +128,15 @@ def download(row, c, track_id):
 
     if result not in (None, 0):
         raise RuntimeError(f'yt-dlp exited with code {result}')
+
+
+def format_error(exc):
+    # Keep the full useful yt-dlp exception text in the DB so the UI can
+    # display it in <details> instead of losing it when the process exits.
+    text = str(exc).strip()
+    if not text:
+        text = repr(exc)
+    return text[-12000:]
 
 
 while True:
@@ -159,15 +170,17 @@ while True:
                 (track_id,),
             )
         except Exception as e:
+            err = format_error(e)
             c.execute(
-                "UPDATE tracks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
-                (str(e)[-6000:], track_id),
+                "UPDATE tracks SET status='failed',progress=0,error=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
+                (err, track_id),
             )
+            heartbeat(c, 'failed:' + track_id)
 
         c.commit()
         heartbeat(c, 'idle')
         c.close()
-    except Exception as e:
+    except Exception:
         if c is not None:
             try:
                 c.close()
