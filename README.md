@@ -1,47 +1,64 @@
-# Spotify Playlist Downloader for OMV v2
+# Spotify Playlist Downloader for OMV
 
 Docker Compose stack for a home OMV server.
 
-## Features
+## v2 features
 
-- Spotify track search
 - Spotify OAuth Authorization Code + PKCE
-- Private/collaborative playlist access for the connected Spotify account
-- SQLite download queue and state
-- Automatic playlist sync scheduler
-- spotDL worker
-- Realtime queue/progress UI with retry for failed jobs
+- Private and collaborative Spotify playlist access
+- Spotify track search UI
+- SQLite-backed download queue
+- Realtime progress polling
+- Retry failed downloads
+- Delete queued/failed items
+- Download history
+- Playlist management: add, sync, enable/disable, delete
+- Worker and scheduler status indicators
+- spotDL worker for Spotify URLs
 - Artist/album/track folder layout under the OMV Music share
 - MeTube for direct YouTube/yt-dlp downloads
+- Healthchecks for all four containers
 - No Docker socket access
 
 ## Architecture
 
-`Browser → FastAPI → Spotify OAuth/API → SQLite → spotDL worker → /music`
+`Browser → FastAPI UI → SQLite queue → spotDL worker → /music`
 
-`Scheduler → FastAPI authenticated playlist sync → SQLite → worker`
+`Browser → FastAPI UI → MeTube /add API → yt-dlp → /music`
 
-`Browser → MeTube → /music`
+`Scheduler → FastAPI private sync endpoint → Spotify OAuth → SQLite queue`
 
-## Spotify setup
+## MeTube API
 
-1. Create an application in the Spotify Developer Dashboard.
-2. Copy the Client ID and Client Secret to `.env`.
-3. Set `SPOTIFY_REDIRECT_URI` to an address reachable by the browser, for example `http://192.168.10.20:8088/api/spotify/callback`.
-4. Register that exact URI in the Spotify application settings.
-5. Start the stack.
-6. Open the web UI and click **Spotify Login / Connect**.
-7. Authorize playlist scopes requested by the application.
+The stack uses the official MeTube `/add` JSON API. The current MeTube source validates a request containing at least `url`, `download_type`, `codec`, `format`, and `quality`; this project sends those fields explicitly and sets `auto_start=true`.
 
-The OAuth refresh token is stored in the SQLite state database mounted at `./state`. Keep that directory private and back it up securely.
+Example payload:
+
+```json
+{
+  "url": "https://www.youtube.com/watch?v=...",
+  "download_type": "audio",
+  "codec": "auto",
+  "format": "mp3",
+  "quality": "best",
+  "auto_start": true
+}
+```
+
+The Compose file currently uses `ghcr.io/alexta69/metube:latest`, so the image is intentionally floating rather than pinned to a release. The `/add` contract was checked against the current upstream source. If reproducible deployments are required, pin the image to a tested MeTube release or digest.
+
+The browser-facing MeTube URL is configured separately with `METUBE_PUBLIC_URL`; `METUBE_URL` remains the Docker-internal address used by FastAPI.
 
 ## OMV setup
 
-1. Create an OMV Music shared folder.
+1. Create a Music shared folder in OMV.
 2. Copy `.env.example` to `.env`.
-3. Set `MUSIC_DIR` to the host path of that shared folder.
-4. Set Spotify credentials and the exact redirect URI.
-5. Start:
+3. Set `MUSIC_DIR` to the host path of the shared folder.
+4. Set `METUBE_PUBLIC_URL` to the OMV LAN address, for example `http://192.168.10.20:8081`.
+5. Set `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET`.
+6. Configure the Spotify redirect URI to exactly match `SPOTIFY_REDIRECT_URI`.
+7. Generate a long random `SYNC_TOKEN`.
+8. Start:
 
 ```bash
 docker compose up -d --build
@@ -49,12 +66,19 @@ docker compose up -d --build
 
 Open `http://OMV-IP:8088` for the custom UI and `http://OMV-IP:8081` for MeTube.
 
-## Queue states
+## Healthchecks
 
-`queued → downloading → completed`
+Check container health:
 
-Failures become `failed` and can be retried from the UI without creating a duplicate Spotify track record.
+```bash
+docker compose ps
+docker inspect --format='{{.Name}} {{.State.Health.Status}}' $(docker compose ps -q)
+```
 
-## Legal / source behavior
+The web container checks `/health`; MeTube checks its HTTP root; worker and scheduler check their SQLite heartbeat. Worker/scheduler heartbeats are refreshed continuously, including while a download or playlist sync is active.
 
-Spotify provides metadata and source URLs to spotDL; this project does not bypass DRM or access controls. Use the stack only for content you are legally entitled to download or store.
+## Spotify OAuth
+
+Use **Spotify Login / Connect** in the UI before adding a private playlist. The refresh token is stored in the local SQLite state database and is not committed to Git.
+
+Only download audio/video that you are legally entitled to access or store. This project does not bypass DRM or access controls.
