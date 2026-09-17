@@ -20,10 +20,6 @@ services:
     depends_on:
       metube:
         condition: service_healthy
-      worker:
-        condition: service_healthy
-      scheduler:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
       interval: 15s
