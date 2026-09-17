@@ -27,7 +27,7 @@ Spotify Search / Playlist metadata
           Jellyfin
 ```
 
-MeTube remains available as a separate browser-facing downloader for direct/manual downloads.
+MeTube remains available as a separate browser-facing downloader. It is not part of the Spotify download path.
 
 ## Features
 
@@ -45,11 +45,11 @@ MeTube remains available as a separate browser-facing downloader for direct/manu
 - Healthchecks for all four containers
 - No Docker socket access
 
-## Important Spotify boundary
+## Spotify boundary
 
-Spotify API is used for catalog/playlist metadata. The application does not pass Spotify audio URLs to the downloader and does not implement Spotify audio downloading or stream ripping.
+Spotify API is used for catalog and playlist metadata. The application does not pass Spotify audio URLs to the downloader and does not implement Spotify audio downloading or stream ripping.
 
-For Development Mode, Spotify requires the app owner/developer account to satisfy Spotify's current requirements. End users are not required to upgrade their account merely to use this application's non-playback metadata workflow, subject to Spotify's current app/user authorization rules.
+Spotify Development Mode currently requires the app owner/developer account to have an active Premium subscription. The application does not check or require Premium for end users; end users still have to satisfy Spotify's current authorization/allowlist rules when using Spotify features. See Spotify's current migration guide for the limits and endpoint changes.
 
 ## Download flow
 
@@ -61,6 +61,10 @@ For Development Mode, Spotify requires the app owner/developer account to satisf
 6. Audio is written to the OMV Music share.
 
 Playlist synchronization creates `pending_source` metadata records. It deliberately does **not** download Spotify tracks automatically.
+
+## MeTube
+
+MeTube is exposed on port 8081 for direct/manual downloads. The current upstream image includes its own HTTP healthcheck and is used independently from the v3 queue. `METUBE_PUBLIC_URL` controls the browser-facing URL.
 
 ## OMV setup
 
@@ -86,7 +90,7 @@ docker compose ps
 docker inspect --format='{{.Name}} {{.State.Health.Status}}' $(docker compose ps -q)
 ```
 
-The web container checks `/health`; worker and scheduler check SQLite heartbeats. MeTube is checked through its HTTP root.
+The web container checks `/health`; worker and scheduler check SQLite heartbeats. MeTube uses the upstream image healthcheck.
 
 ## Security
 
