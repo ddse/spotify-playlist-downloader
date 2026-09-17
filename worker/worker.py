@@ -1,5 +1,7 @@
-import os, re, sqlite3, subprocess, time
+import os, sqlite3, time
 from pathlib import Path
+
+import yt_dlp
 
 DB_PATH = os.getenv('DB_PATH', '/state/app.db')
 MUSIC_DIR = os.getenv('MUSIC_DIR', '/music')
@@ -37,6 +39,13 @@ def init(c):
         c.execute("ALTER TABLE tracks ADD COLUMN source_url TEXT")
     if 'progress' not in cols:
         c.execute("ALTER TABLE tracks ADD COLUMN progress INTEGER DEFAULT 0")
+
+    # A worker restart must not leave an interrupted job permanently stuck.
+    c.execute("""
+        UPDATE tracks
+        SET status='queued', progress=0, error=NULL, updated_at=CURRENT_TIMESTAMP
+        WHERE status='downloading' AND source_url IS NOT NULL
+    """)
     c.commit()
 
 
@@ -50,13 +59,12 @@ def heartbeat(c, detail='idle'):
     c.commit()
 
 
-def run(row):
+def download(row, c, track_id):
     Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
     url = row['source_url']
     if not url:
         raise RuntimeError('No download source selected')
 
-    # Keep the user's Spotify metadata in the filename when available.
     artist = (row['artists'] or 'Unknown Artist').replace('/', '_')
     album = (row['album'] or 'YouTube').replace('/', '_')
     title = (row['title'] or 'Unknown Title').replace('/', '_')
@@ -64,44 +72,73 @@ def run(row):
     folder.mkdir(parents=True, exist_ok=True)
     output = str(folder / f'{title}.%(ext)s')
 
-    cmd = [
-        'yt-dlp',
-        '--newline',
-        '--no-part',
-        '--no-warnings',
-        '--progress',
-        '--progress-delta', '2',
-        '--extractor-args', 'youtube:player_client=web',
-        '-x',
-        '--audio-format', FMT,
-        '--audio-quality', BITRATE,
-        '--embed-metadata',
-        '--force-overwrites',
-        '-o', output,
-        url,
-    ]
-    return subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
+    last_progress = -1
+    last_heartbeat = 0.0
 
+    def progress_hook(data):
+        nonlocal last_progress, last_heartbeat
+        now = time.time()
 
-def pct(line):
-    m = re.search(r'(\d{1,3}(?:\.\d+)?)%', line)
-    return max(0, min(100, int(float(m.group(1))))) if m else None
+        if data.get('status') == 'downloading':
+            total = data.get('total_bytes') or data.get('total_bytes_estimate')
+            downloaded = data.get('downloaded_bytes', 0)
+            percent = int(downloaded * 100 / total) if total else 1
+            percent = max(1, min(99, percent))
+            if percent != last_progress:
+                c.execute(
+                    'UPDATE tracks SET progress=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
+                    (percent, track_id),
+                )
+                c.commit()
+                last_progress = percent
+
+            if now - last_heartbeat >= 5:
+                heartbeat(c, 'downloading:' + track_id)
+                last_heartbeat = now
+
+        elif data.get('status') == 'finished':
+            c.execute(
+                'UPDATE tracks SET progress=99,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
+                (track_id,),
+            )
+            c.commit()
+            heartbeat(c, 'postprocessing:' + track_id)
+
+    opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': output,
+        'noplaylist': True,
+        'quiet': True,
+        'no_warnings': False,
+        'progress_hooks': [progress_hook],
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': FMT,
+            'preferredquality': BITRATE,
+        }],
+        'writethumbnail': False,
+        'embedmetadata': True,
+        'overwrites': True,
+    }
+
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        result = ydl.download([url])
+
+    if result not in (None, 0):
+        raise RuntimeError(f'yt-dlp exited with code {result}')
 
 
 while True:
+    c = None
     try:
         c = conn()
         init(c)
         heartbeat(c)
+
         row = c.execute(
             "SELECT * FROM tracks WHERE status='queued' AND source_url IS NOT NULL ORDER BY created_at LIMIT 1"
         ).fetchone()
+
         if not row:
             c.close()
             time.sleep(3)
@@ -116,50 +153,24 @@ while True:
         heartbeat(c, 'starting:' + track_id)
 
         try:
-            p = run(row)
-            output = []
-            last_hb = time.time()
-            while True:
-                line = p.stdout.readline()
-                if line:
-                    output.append(line)
-                    n = pct(line)
-                    if n is not None:
-                        c.execute(
-                            'UPDATE tracks SET progress=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
-                            (n, track_id),
-                        )
-                        c.commit()
-                    heartbeat(c, 'downloading:' + track_id)
-                elif p.poll() is not None:
-                    break
-                else:
-                    time.sleep(0.1)
-
-                if time.time() - last_hb >= 5:
-                    heartbeat(c, 'downloading:' + track_id)
-                    last_hb = time.time()
-
-            rc = p.wait(timeout=30)
-            if rc == 0:
-                c.execute(
-                    "UPDATE tracks SET status='completed',progress=100,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
-                    (track_id,),
-                )
-            else:
-                err = ''.join(output)[-6000:] or f'yt-dlp exited with code {rc}'
-                c.execute(
-                    "UPDATE tracks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
-                    (err, track_id),
-                )
+            download(row, c, track_id)
+            c.execute(
+                "UPDATE tracks SET status='completed',progress=100,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
+                (track_id,),
+            )
         except Exception as e:
             c.execute(
                 "UPDATE tracks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
-                (str(e), track_id),
+                (str(e)[-6000:], track_id),
             )
 
         c.commit()
         heartbeat(c, 'idle')
         c.close()
-    except Exception:
+    except Exception as e:
+        if c is not None:
+            try:
+                c.close()
+            except Exception:
+                pass
         time.sleep(10)
