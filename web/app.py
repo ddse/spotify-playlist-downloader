@@ -11,19 +11,20 @@ def db():
     c=sqlite3.connect(DB_PATH,timeout=30); c.row_factory=sqlite3.Row
     c.execute('''CREATE TABLE IF NOT EXISTS tracks(spotify_id TEXT PRIMARY KEY,title TEXT NOT NULL,artists TEXT NOT NULL,album TEXT,spotify_url TEXT,status TEXT NOT NULL DEFAULT 'queued',progress INTEGER DEFAULT 0,error TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
     c.execute('''CREATE TABLE IF NOT EXISTS playlists(spotify_id TEXT PRIMARY KEY,name TEXT NOT NULL,url TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,last_sync TEXT)''')
+    cols={r[1] for r in c.execute('PRAGMA table_info(tracks)').fetchall()}
+    if 'progress' not in cols: c.execute('ALTER TABLE tracks ADD COLUMN progress INTEGER DEFAULT 0')
     c.commit(); return c
 
 def pid(url):
-    m=re.search(r'playlist/([A-Za-z0-9]+)',url)
-    return m.group(1) if m else url.rstrip('/').split('/')[-1].split('?')[0]
+    m=re.search(r'playlist/([A-Za-z0-9]+)',url); return m.group(1) if m else url.rstrip('/').split('/')[-1].split('?')[0]
 
 @app.on_event('startup')
 def startup(): db().close()
 
 @app.get('/',response_class=HTMLResponse)
 def index(request:Request):
-    c=db(); tracks=c.execute('SELECT * FROM tracks ORDER BY created_at DESC LIMIT 100').fetchall(); playlists=c.execute('SELECT * FROM playlists ORDER BY name').fetchall(); c.close()
-    return templates.TemplateResponse('index.html',{'request':request,'tracks':tracks,'playlists':playlists,'spotify_connected':False})
+    c=db(); tracks=c.execute('SELECT * FROM tracks ORDER BY created_at DESC LIMIT 100').fetchall(); playlists=c.execute('SELECT * FROM playlists ORDER BY name').fetchall(); connected=c.execute('SELECT 1 FROM spotify_tokens WHERE id=1').fetchone() is not None if c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='spotify_tokens'").fetchone() else False; c.close()
+    return templates.TemplateResponse('index.html',{'request':request,'tracks':tracks,'playlists':playlists,'spotify_connected':connected})
 
 @app.get('/api/health')
 async def health(): return {'ok':True,'spotify_connected':bool(await access_token())}
