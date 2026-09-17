@@ -1,10 +1,10 @@
-import os, re, sqlite3
-from fastapi import FastAPI, Form, Request
+import os, re, sqlite3, secrets
+from fastapi import FastAPI, Form, Request, Header, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from spotify import authorize_url, exchange, access_token, public_search, playlist_items, playlist_info
 
-DB_PATH=os.getenv('DB_PATH','/state/app.db'); METUBE_URL=os.getenv('METUBE_URL','http://metube:8081')
+DB_PATH=os.getenv('DB_PATH','/state/app.db'); METUBE_URL=os.getenv('METUBE_URL','http://metube:8081'); SYNC_TOKEN=os.getenv('SYNC_TOKEN','')
 app=FastAPI(title='Spotify Playlist Downloader v2'); templates=Jinja2Templates(directory='templates')
 
 def db():
@@ -67,7 +67,8 @@ async def add_playlist(url:str=Form(...)):
     except Exception: return RedirectResponse('/?playlist_error=1',303)
 
 @app.post('/api/playlists/{playlist_id}/sync')
-async def sync_playlist(playlist_id:str):
+async def sync_playlist(playlist_id:str,x_sync_token:str=Header(default='')):
+    if not SYNC_TOKEN or not secrets.compare_digest(x_sync_token,SYNC_TOKEN): raise HTTPException(403,'internal sync authorization required')
     try:
         tracks=await playlist_items(playlist_id); c=db()
         for t in tracks:
