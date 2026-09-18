@@ -26,6 +26,7 @@ TRACK_BASE_COLUMNS = {
     'total_bytes': 'INTEGER DEFAULT 0',
     'download_speed': "TEXT DEFAULT ''",
     'eta': "TEXT DEFAULT ''",
+    'wireguard': 'INTEGER DEFAULT 0',
 }
 
 
@@ -69,7 +70,8 @@ def init_db(c=None):
         downloaded_bytes INTEGER DEFAULT 0,
         total_bytes INTEGER DEFAULT 0,
         download_speed TEXT DEFAULT '',
-        eta TEXT DEFAULT ''
+        eta TEXT DEFAULT '',
+        wireguard INTEGER DEFAULT 0
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS playlists(
         spotify_id TEXT PRIMARY KEY,
