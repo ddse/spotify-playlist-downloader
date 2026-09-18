@@ -18,6 +18,23 @@ def db():
     if 'source_type' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN source_type TEXT DEFAULT 'spotify'")
     if 'source_url' not in cols: c.execute('ALTER TABLE tracks ADD COLUMN source_url TEXT')
     if 'progress' not in cols: c.execute('ALTER TABLE tracks ADD COLUMN progress INTEGER DEFAULT 0')
+    if 'download_type' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN download_type TEXT DEFAULT 'audio'")
+    if 'download_format' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN download_format TEXT DEFAULT 'mp3'")
+    if 'download_quality' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN download_quality TEXT DEFAULT 'best'")
+    if 'video_codec' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN video_codec TEXT DEFAULT 'auto'")
+    if 'download_folder' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN download_folder TEXT DEFAULT ''")
+    if 'thumbnail' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN thumbnail INTEGER DEFAULT 1")
+    if 'subtitle' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN subtitle INTEGER DEFAULT 0")
+    if 'subtitle_lang' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN subtitle_lang TEXT DEFAULT 'ja,en'")
+    if 'subtitle_mode' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN subtitle_mode TEXT DEFAULT 'prefer_manual'")
+    if 'split_chapters' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN split_chapters INTEGER DEFAULT 0")
+    if 'auto_start' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN auto_start INTEGER DEFAULT 1")
+    if 'priority' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN priority INTEGER DEFAULT 0")
+    if 'source_mode' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN source_mode TEXT DEFAULT 'single'")
+    if 'downloaded_bytes' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN downloaded_bytes INTEGER DEFAULT 0")
+    if 'total_bytes' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN total_bytes INTEGER DEFAULT 0")
+    if 'download_speed' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN download_speed TEXT DEFAULT ''")
+    if 'eta' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN eta TEXT DEFAULT ''")
     c.commit(); return c
 
 def pid(url):
