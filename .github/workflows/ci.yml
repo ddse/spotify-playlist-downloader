@@ -3,7 +3,8 @@ name: CI
 # Feature branch conflict resolution validation
 # provider schema syntax fixed
 # dependencies installed before test suites
-# provider path isolation fixed/CD
+# provider path isolation fixed
+# provider API routes restored/CD
 
 on:
   pull_request:
