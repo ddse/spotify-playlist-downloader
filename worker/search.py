@@ -5,6 +5,44 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import yt_dlp
 
+import re
+import urllib.request
+import xml.etree.ElementTree as ET
+from urllib.parse import urlparse
+
+def is_nhaccuatui(url):
+    try:
+        host = (urlparse(url).hostname or '').lower()
+        return host == 'nhaccuatui.com' or host.endswith('.nhaccuatui.com')
+    except Exception:
+        return False
+
+def resolve_nhaccuatui(url):
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        html = r.read().decode('utf-8', errors='ignore')
+    match = re.search(r'player\.peConfig\.xmlURL\s*=\s*"([^"]+)"', html)
+    if not match:
+        raise RuntimeError('NhacCuaTui: player XML URL not found')
+    xml_url = match.group(1).replace('\\/', '/')
+    req = urllib.request.Request(xml_url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        xml_data = r.read()
+    root = ET.fromstring(xml_data)
+    tracks = root.findall('.//track')
+    if not tracks:
+        raise RuntimeError('NhacCuaTui: no track found in XML')
+    track = tracks[0]
+    def value(name):
+        node = track.find(name)
+        return (node.text or '').strip() if node is not None else ''
+    direct = value('location')
+    title = value('title') or url.rstrip('/').split('/')[-1].split('.')[0]
+    if not direct:
+        raise RuntimeError('NhacCuaTui: direct audio URL not found')
+    return {'url': direct, 'title': title}
+
+
 PAGE_SIZE = 10
 MAX_SEARCH_RESULTS = 50
 HOST = os.getenv("WORKER_API_HOST", "0.0.0.0")
@@ -17,6 +55,29 @@ def search(query: str, page: int = 1, limit: int = PAGE_SIZE):
     limit = max(1, min(int(limit), PAGE_SIZE))
     if not query:
         return {"items": [], "page": page, "limit": limit, "has_more": False}
+
+    # Paste a direct Zing MP3 / NhacCuaTui URL into the existing search box.
+    if query.startswith(('http://', 'https://')):
+        if is_nhaccuatui(query):
+            item = resolve_nhaccuatui(query)
+            return {"items": [{"id": query, "title": item["title"], "channel": "NhacCuaTui",
+                               "duration": None, "url": query, "thumbnail": ""}],
+                    "page": 1, "limit": 1, "has_more": False}
+        try:
+            with yt_dlp.YoutubeDL({"extract_flat": True, "skip_download": True, "quiet": True,
+                                   "no_warnings": True, "noplaylist": True}) as ydl:
+                entry = ydl.extract_info(query, download=False)
+            if entry:
+                return {"items": [{"id": entry.get("id") or query,
+                                   "title": entry.get("title") or query,
+                                   "channel": entry.get("channel") or entry.get("uploader") or "",
+                                   "duration": entry.get("duration"),
+                                   "url": entry.get("webpage_url") or query,
+                                   "thumbnail": entry.get("thumbnail") or ""}],
+                        "page": 1, "limit": 1, "has_more": False}
+        except Exception as exc:
+            return {"items": [], "page": 1, "limit": 1, "has_more": False,
+                    "error": f"{type(exc).__name__}: {exc}"}
 
     end = min(MAX_SEARCH_RESULTS, page * limit)
     opts = {
