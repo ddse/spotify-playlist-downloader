@@ -1,6 +1,7 @@
 name: CI
 
-# Feature branch conflict resolution validation/CD
+# Feature branch conflict resolution validation
+# provider schema syntax fixed/CD
 
 on:
   pull_request:
