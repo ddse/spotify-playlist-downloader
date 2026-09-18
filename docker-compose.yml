@@ -35,6 +35,7 @@ services:
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
+      - SYS_MODULE
     sysctls:
       - net.ipv4.conf.all.src_valid_mark=1
     environment:
@@ -49,6 +50,7 @@ services:
       - ${MUSIC_DIR}:/music
       - ./state:/state
       - ./wireguard:/etc/wireguard:ro
+      - /lib/modules:/lib/modules:ro
     expose:
       - "8090"
     healthcheck:
