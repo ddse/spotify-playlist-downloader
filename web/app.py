@@ -1,4 +1,4 @@
-import os, re, sqlite3, secrets, time
+import os, re, sqlite3, secrets, time, json
 from pathlib import Path
 import httpx
 from fastapi import FastAPI, Form, Request, Header, HTTPException
@@ -46,6 +46,70 @@ async def health(): return {'ok':True}
 async def api_health():
     c=db(); w=worker_state(c,'worker'); s=worker_state(c,'scheduler'); c.close(); return {'ok':True,'spotify_connected':bool(await access_token()),'worker':w,'scheduler':s,'wireguard':wireguard_enabled()}
 
+PROVIDER_DEFAULTS = {
+    'spotify': {'client_id':'', 'client_secret':'', 'redirect_uri':'http://localhost:8088/api/spotify/callback'},
+    'youtube': {'cookies':'', 'proxy':''},
+    'soundcloud': {'cookies':'', 'proxy':''},
+    'tiktok': {'cookies':'', 'proxy':''},
+    'apple_music': {'developer_token':''},
+    'zingmp3': {},
+    'nhaccuatui': {},
+}
+
+def provider_row(c, provider):
+    row=c.execute('SELECT * FROM provider_connections WHERE provider=?',(provider,)).fetchone()
+    if not row:
+        cfg=PROVIDER_DEFAULTS.get(provider,{})
+        return {'provider':provider,'enabled':True,'config':cfg,'configured':False,'status':'not_configured','error':'','last_tested_at':None}
+    try: cfg=json.loads(row['config_json'] or '{}')
+    except Exception: cfg={}
+    configured=any(bool(v) for v in cfg.values())
+    safe=dict(cfg)
+    for key in ('client_secret','developer_token'):
+        if safe.get(key): safe[key]='********'
+    if cfg.get('cookies'): safe['cookies']='********'
+    return {'provider':provider,'enabled':bool(row['enabled']),'config':safe,'configured':configured,'status':row['status'] or 'not_configured','error':row['error'] or '','last_tested_at':row['last_tested_at']}
+
+@app.get('/api/settings/connections')
+def provider_connections():
+    c=db(); items={p:provider_row(c,p) for p in PROVIDER_DEFAULTS}; c.close(); return {'items':items}
+
+@app.put('/api/settings/connections/{provider}')
+async def update_provider_connection(provider:str, request:Request):
+    if provider not in PROVIDER_DEFAULTS: raise HTTPException(404,'unknown provider')
+    body=await request.json(); cfg=body.get('config') or {}; enabled=1 if body.get('enabled',True) else 0
+    c=db(); existing=c.execute('SELECT config_json FROM provider_connections WHERE provider=?',(provider,)).fetchone()
+    old=json.loads(existing['config_json']) if existing and existing['config_json'] else {}
+    for k,v in list(cfg.items()):
+        if v=='********': cfg[k]=old.get(k,'')
+    c.execute('INSERT INTO provider_connections(provider,enabled,config_json,status,error,updated_at) VALUES(?,?,?,CASE WHEN ? THEN \'configured\' ELSE \'disabled\' END,\'\',CURRENT_TIMESTAMP) ON CONFLICT(provider) DO UPDATE SET enabled=excluded.enabled,config_json=excluded.config_json,status=excluded.status,error=\'\',updated_at=CURRENT_TIMESTAMP',(provider,enabled,json.dumps(cfg),enabled))
+    c.commit(); result=provider_row(c,provider); c.close(); return result
+
+@app.post('/api/settings/connections/{provider}/test')
+async def test_provider_connection(provider:str):
+    if provider not in PROVIDER_DEFAULTS: raise HTTPException(404,'unknown provider')
+    c=db(); row=c.execute('SELECT enabled,config_json FROM provider_connections WHERE provider=?',(provider,)).fetchone()
+    cfg=json.loads(row['config_json']) if row and row['config_json'] else PROVIDER_DEFAULTS[provider]
+    if not row or not row['enabled']:
+        c.close(); return {'ok':False,'status':'disabled','error':'Provider is disabled'}
+    ok=True; error=''
+    try:
+        if provider=='spotify':
+            from spotify import spotify_credentials
+            cid,secret,redirect=spotify_credentials()
+            if not cid: raise ValueError('Client ID is required')
+            if not redirect: raise ValueError('Redirect URI is required')
+            if secret:
+                async with httpx.AsyncClient(timeout=15) as x:
+                    r=await x.post('https://accounts.spotify.com/api/token',data={'grant_type':'client_credentials'},headers={'Authorization':'Basic '+__import__('base64').b64encode(f'{cid}:{secret}'.encode()).decode()})
+                    if r.status_code>=400: raise RuntimeError(f'Spotify token test failed: HTTP {r.status_code}')
+        elif provider=='apple_music':
+            if not cfg.get('developer_token'): raise ValueError('Developer Token is required')
+    except Exception as e:
+        ok=False; error=str(e)
+    c.execute('UPDATE provider_connections SET status=?,error=?,last_tested_at=CURRENT_TIMESTAMP WHERE provider=?',('connected' if ok else 'error',error,provider)); c.commit(); c.close()
+    return {'ok':ok,'status':'connected' if ok else 'error','error':error}
+
 @app.get('/api/services')
 async def services():
     c=db(); result={k:worker_state(c,k) for k in ('worker','scheduler')}; c.close()
@@ -71,35 +135,6 @@ async def services():
         result['wireguard']['status']='unavailable'
         result['wireguard']['detail']=str(e)
     return result
-
-@app.get('/api/settings/wireguard')
-def get_wireguard_setting():
-    return {'enabled': wireguard_enabled()}
-
-@app.post('/api/settings/wireguard')
-async def set_wireguard_setting(enabled: bool = Form(False)):
-    # Persist the default for newly queued jobs and immediately switch the
-    # single worker's network route. The worker serializes this with downloads.
-    value='1' if enabled else '0'
-    try:
-        async with httpx.AsyncClient(timeout=None) as client:
-            response = await client.post(
-                f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard",
-                data={'enabled': '1' if enabled else '0'},
-            )
-            response.raise_for_status()
-    except Exception as e:
-        raise HTTPException(503, f'Worker WireGuard toggle failed: {e}')
-
-    c=db()
-    c.execute(
-        "INSERT INTO app_settings(key,value) VALUES('wireguard_enabled',?) "
-        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (value,),
-    )
-    c.commit()
-    c.close()
-    return {'ok': True, 'enabled': bool(enabled)}
 
 @app.get('/api/spotify/login')
 def spotify_login(): return RedirectResponse(authorize_url())
@@ -152,10 +187,21 @@ async def search_spotify(q:str=''):
     }
 
 @app.get('/api/search/youtube')
-async def search_youtube(q:str='',page:int=1,limit:int=10,wireguard:bool=None):
+async def search_youtube(q:str='',page:int=1,limit:int=10):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    use_vpn = wireguard_enabled() if wireguard is None else bool(wireguard)
-    try:return await youtube_search(q,page=page,limit=limit,wireguard=use_vpn)
+    try:return await youtube_search(q,page=page,limit=limit,wireguard=wireguard_enabled())
+    except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
+
+@app.get('/api/search/zingmp3')
+async def search_zingmp3(q:str='',page:int=1,limit:int=10):
+    if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
+    try:return await youtube_search(q,page=page,limit=limit,source='zingmp3',wireguard=wireguard_enabled())
+    except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
+
+@app.get('/api/search/nhaccuatui')
+async def search_nhaccuatui(q:str='',page:int=1,limit:int=10):
+    if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
+    try:return await youtube_search(q,page=page,limit=limit,source='nhaccuatui',wireguard=wireguard_enabled())
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.post('/api/download')
@@ -202,7 +248,7 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
         'artists': artists,
         'album': album,
         'spotify_url': source_url,
-        'source_type': 'youtube',
+        'source_type': detect_source_type(source_url),
         'source_url': source_url,
         'download_type': download_type,
         'download_format': download_format,
@@ -259,9 +305,9 @@ def prioritize_queue(track_id:str):
     c=db(); c.execute("UPDATE tracks SET priority=priority+1,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status IN ('queued','paused')",(track_id,)); c.commit(); c.close(); return {'ok':True}
 
 @app.post('/api/import/youtube')
-def import_youtube(source_url:str=Form(...),source_mode:str=Form('playlist'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('320'),download_folder:str=Form('YouTube'),playlist_item_limit:str=Form('0'),wireguard:str=Form('')):
+def import_youtube(source_url:str=Form(...),source_mode:str=Form('playlist'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('320'),download_folder:str=Form('YouTube'),playlist_item_limit:str=Form('0')):
     title = source_url.rstrip('/').split('/')[-1].split('?')[0] or 'YouTube import'
-    return download(source_url=source_url,title=title,artists='YouTube',album=source_mode,youtube_id='',source_mode=source_mode,download_type=download_type,download_format=download_format,download_quality=download_quality,video_codec='auto',download_folder=download_folder,thumbnail='1',subtitle='0',subtitle_lang='ja,en',subtitle_mode='prefer_manual',playlist_item_limit=playlist_item_limit,split_chapters='0',auto_start='1',wireguard=wireguard)
+    return download(source_url=source_url,title=title,artists='YouTube',album=source_mode,youtube_id='',source_mode=source_mode,download_type=download_type,download_format=download_format,download_quality=download_quality,video_codec='auto',download_folder=download_folder,thumbnail='1',subtitle='0',subtitle_lang='ja,en',subtitle_mode='prefer_manual',playlist_item_limit=playlist_item_limit,split_chapters='0',auto_start='1')
 
 @app.post('/api/queue/bulk')
 def queue_bulk(action:str=Form(...),ids:str=Form('')):

@@ -1,4 +1,11 @@
-name: CI/CD
+name: CI
+
+# Feature branch conflict resolution validation
+# provider schema syntax fixed
+# dependencies installed before test suites
+# provider path isolation fixed
+# provider API routes restored
+# database import restored/CD
 
 on:
   pull_request:
@@ -29,11 +36,19 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Install Python test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r web/requirements.txt pytest
+          pip install "yt-dlp[default]"
+
       - name: Python syntax
         run: python -m compileall -q database.py web worker tests
 
       - name: Python automation tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Provider pytest suite
+        run: python -m pytest -q
 
       - name: Frontend build
         working-directory: web

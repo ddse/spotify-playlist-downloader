@@ -73,6 +73,15 @@ def init_db(c=None):
         eta TEXT DEFAULT '',
         wireguard INTEGER DEFAULT 0
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS provider_connections(
+        provider TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        config_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT DEFAULT 'not_configured',
+        error TEXT,
+        last_tested_at TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )''')
     c.execute('''CREATE TABLE IF NOT EXISTS playlists(
         spotify_id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
