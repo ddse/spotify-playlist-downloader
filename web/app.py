@@ -102,10 +102,54 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
     start = 1 if str(auto_start).lower() in {'1','true','on','yes'} else 0
     key=('yt:'+youtube_id if youtube_id else 'url:'+secrets.token_hex(12))+':'+download_type+':'+download_format+':'+download_quality+':'+video_codec+':'+folder+':'+str(item_limit)
     c=db()
-    c.execute('''INSERT INTO tracks(spotify_id,title,artists,album,spotify_url,status,progress,error,source_type,source_url,download_type,download_format,download_quality,video_codec,download_folder,source_mode,thumbnail,subtitle_lang,subtitle_mode,playlist_item_limit,split_chapters,auto_start,priority)
-      VALUES(?,?,?,?,?,'queued',0,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
-      ON CONFLICT(spotify_id) DO UPDATE SET title=excluded.title,artists=excluded.artists,album=excluded.album,source_type=excluded.source_type,source_url=excluded.source_url,download_type=excluded.download_type,download_format=excluded.download_format,download_quality=excluded.download_quality,video_codec=excluded.video_codec,download_folder=excluded.download_folder,thumbnail=excluded.thumbnail,subtitle=excluded.subtitle,subtitle_lang=excluded.subtitle_lang,subtitle_mode=excluded.subtitle_mode,playlist_item_limit=excluded.playlist_item_limit,split_chapters=excluded.split_chapters,auto_start=excluded.auto_start,status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,error=NULL,updated_at=CURRENT_TIMESTAMP''',
-      (key,title,artists,album,source_url,'youtube',source_url,download_type,download_format,download_quality,video_codec,folder,source_mode,thumb,subs,subtitle_lang,subtitle_mode,item_limit,chapters,start))
+    # Use named parameters here so adding/removing a column cannot silently
+    # create a positional-binding mismatch.
+    params = {
+        'spotify_id': key,
+        'title': title,
+        'artists': artists,
+        'album': album,
+        'spotify_url': source_url,
+        'source_type': 'youtube',
+        'source_url': source_url,
+        'download_type': download_type,
+        'download_format': download_format,
+        'download_quality': download_quality,
+        'video_codec': video_codec,
+        'download_folder': folder,
+        'source_mode': source_mode,
+        'thumbnail': thumb,
+        'subtitle': subs,
+        'subtitle_lang': subtitle_lang,
+        'subtitle_mode': subtitle_mode,
+        'playlist_item_limit': item_limit,
+        'split_chapters': chapters,
+        'auto_start': start,
+    }
+    c.execute('''INSERT INTO tracks(
+        spotify_id,title,artists,album,spotify_url,status,progress,error,
+        source_type,source_url,download_type,download_format,download_quality,
+        video_codec,download_folder,source_mode,thumbnail,subtitle,
+        subtitle_lang,subtitle_mode,playlist_item_limit,split_chapters,auto_start,priority
+    ) VALUES(
+        :spotify_id,:title,:artists,:album,:spotify_url,'queued',0,NULL,
+        :source_type,:source_url,:download_type,:download_format,:download_quality,
+        :video_codec,:download_folder,:source_mode,:thumbnail,:subtitle,
+        :subtitle_lang,:subtitle_mode,:playlist_item_limit,:split_chapters,:auto_start,0
+    )
+    ON CONFLICT(spotify_id) DO UPDATE SET
+        title=excluded.title, artists=excluded.artists, album=excluded.album,
+        source_type=excluded.source_type, source_url=excluded.source_url,
+        download_type=excluded.download_type, download_format=excluded.download_format,
+        download_quality=excluded.download_quality, video_codec=excluded.video_codec,
+        download_folder=excluded.download_folder, source_mode=excluded.source_mode,
+        thumbnail=excluded.thumbnail, subtitle=excluded.subtitle,
+        subtitle_lang=excluded.subtitle_lang, subtitle_mode=excluded.subtitle_mode,
+        playlist_item_limit=excluded.playlist_item_limit,
+        split_chapters=excluded.split_chapters, auto_start=excluded.auto_start,
+        status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,
+        progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,
+        error=NULL, updated_at=CURRENT_TIMESTAMP''', params)
     c.commit(); c.close()
     return {'ok': True, 'id': key, 'status': 'queued'}
 
