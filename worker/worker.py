@@ -143,9 +143,11 @@ def download(row, c, track_id):
     }
 
     if download_type == 'audio':
+        # Do not require the source stream itself to already be mp3/m4a/etc.
+        # YouTube commonly serves webm/mp4 audio and ffmpeg converts it later.
         audio_format = download_format if download_format in {'m4a','mp3','opus','wav','flac'} else 'mp3'
         audio_quality = download_quality if download_quality in {'0','128','192','256','320','best'} else '320'
-        opts['format'] = f'bestaudio[ext={audio_format}]/bestaudio/best'
+        opts['format'] = 'bestaudio/best'
         opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': audio_format,
@@ -161,18 +163,20 @@ def download(row, c, track_id):
     else:
         quality = download_quality if download_quality in {'best','2160','1440','1080','720','480','360'} else 'best'
         height = '' if quality == 'best' else f'[height<={quality}]'
-        vf = '' if download_format == 'any' else '[ext=mp4]'
-        codec_map = {
-            'h264': "[vcodec~='^(h264|avc)']",
-            'h265': "[vcodec~='^(h265|hevc)']",
-            'av1': "[vcodec~='^av0?1']",
-            'vp9': "[vcodec~='^vp0?9']",
-        }
-        codec_filter = codec_map.get(video_codec, '')
-        vsel = f'bestvideo{codec_filter}{height}{vf}'
+
+        # Keep the selector permissive and let yt-dlp choose formats actually
+        # exposed by the current YouTube player client. Strict ext/codec filters
+        # can produce "Requested format is not available" even when usable
+        # formats exist.
         if download_format == 'ios':
-            vsel = f"bestvideo[vcodec~='^((he|a)vc|h26[45])']{height}"
-        opts['format'] = f'{vsel}+bestaudio[ext=m4a]/{vsel}+bestaudio/best{height}{vf}'
+            vsel = f"bestvideo[vcodec~='^(avc|h264)']{height}"
+            fallback_vsel = f"bestvideo{height}"
+            opts['format'] = f'{vsel}+bestaudio/{fallback_vsel}+bestaudio/best{height}'
+        elif download_format == 'mp4':
+            vsel = f'bestvideo[ext=mp4]{height}'
+            opts['format'] = f'{vsel}+bestaudio[ext=m4a]/{vsel}+bestaudio/bestvideo{height}+bestaudio/best{height}'
+        else:
+            opts['format'] = f'bestvideo{height}+bestaudio/best{height}'
         opts['merge_output_format'] = 'mp4'
 
     with yt_dlp.YoutubeDL(opts) as ydl:
