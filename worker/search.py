@@ -84,6 +84,11 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/health":
             return self._json(200, {"ok": True, "service": "worker"})
+        if parsed.path == "/api/wireguard":
+            try:
+                return self._json(200, manager.status())
+            except Exception as exc:
+                return self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
         if parsed.path != "/api/search/youtube":
             return self._json(404, {"error": "not found"})
 
