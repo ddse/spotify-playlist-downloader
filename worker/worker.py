@@ -38,6 +38,8 @@ def init(c):
     cols = {r[1] for r in c.execute('PRAGMA table_info(tracks)').fetchall()}
     if 'source_type' not in cols:
         c.execute("ALTER TABLE tracks ADD COLUMN source_type TEXT DEFAULT 'spotify'")
+    if 'spotify_url' not in cols:
+        c.execute("ALTER TABLE tracks ADD COLUMN spotify_url TEXT")
     if 'source_url' not in cols:
         c.execute("ALTER TABLE tracks ADD COLUMN source_url TEXT")
     if 'progress' not in cols:
