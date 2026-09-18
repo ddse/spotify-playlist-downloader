@@ -1,5 +1,6 @@
 import os, re, sqlite3, secrets, time, json
 from pathlib import Path
+from urllib.parse import urlparse
 import httpx
 from fastapi import FastAPI, Form, Request, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
@@ -89,6 +90,22 @@ def provider_row(c, provider):
         if safe.get(key): safe[key]='********'
     if cfg.get('cookies'): safe['cookies']='********'
     return {'provider':provider,'enabled':bool(row['enabled']),'config':safe,'configured':configured,'status':row['status'] or 'not_configured','error':row['error'] or '','last_tested_at':row['last_tested_at']}
+
+@app.get('/api/settings/wireguard/files')
+async def wireguard_files():
+    """Find WireGuard config files inside the worker's mounted config directory."""
+    result = {'files': [], 'directory': '/etc/wireguard'}
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            response = await client.get(
+                f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard/files"
+            )
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        result['error'] = str(e)
+        return result
+
 
 @app.get('/api/settings/wireguard')
 async def wireguard_settings():
