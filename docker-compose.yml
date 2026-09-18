@@ -12,6 +12,10 @@ services:
       SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET}
       SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI}
       SYNC_TOKEN: ${SYNC_TOKEN}
+      WORKER_ENDPOINT: http://worker:8090
+    depends_on:
+      worker:
+        condition: service_started
     volumes:
       - ${MUSIC_DIR}:/music
       - ./state:/state
