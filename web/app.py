@@ -14,6 +14,17 @@ app.mount('/assets', StaticFiles(directory='static/assets'), name='assets')
 
 from database import db
 
+def detect_source_type(url):
+    try:
+        host = re.sub(r'^www\\.', '', (httpx.URL(url).host or '').lower())
+        if host == 'zingmp3.vn' or host.endswith('.zingmp3.vn'):
+            return 'zingmp3'
+        if host == 'nhaccuatui.com' or host.endswith('.nhaccuatui.com'):
+            return 'nhaccuatui'
+    except Exception:
+        pass
+    return 'youtube'
+
 def pid(url):
     m=re.search(r'playlist/([A-Za-z0-9]+)',url); return m.group(1) if m else url.rstrip('/').split('/')[-1].split('?')[0]
 
@@ -139,7 +150,7 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
         'artists': artists,
         'album': album,
         'spotify_url': source_url,
-        'source_type': 'youtube',
+        'source_type': detect_source_type(source_url),
         'source_url': source_url,
         'download_type': download_type,
         'download_format': download_format,
