@@ -4,7 +4,8 @@ name: CI
 # provider schema syntax fixed
 # dependencies installed before test suites
 # provider path isolation fixed
-# provider API routes restored/CD
+# provider API routes restored
+# database import restored/CD
 
 on:
   pull_request:
