@@ -16,11 +16,13 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
+# Every push to main and every PR targeting main gets its own CI run.
+# Do not cancel an in-flight run when another commit is pushed: each commit
+# must be independently validated before it can be considered mergeable.
 concurrency:
-  group: ci-cd-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   validate:
