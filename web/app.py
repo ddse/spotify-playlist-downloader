@@ -1,7 +1,7 @@
 import os, re, sqlite3, secrets, time
 from pathlib import Path
 import httpx
-from fastapi import FastAPI, Form, Request, Header, HTTPException
+from fastapi import FastAPI, Form, Request, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
