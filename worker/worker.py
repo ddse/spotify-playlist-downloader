@@ -40,6 +40,14 @@ def init(c):
         c.execute("ALTER TABLE tracks ADD COLUMN source_url TEXT")
     if 'progress' not in cols:
         c.execute("ALTER TABLE tracks ADD COLUMN progress INTEGER DEFAULT 0")
+    if 'download_type' not in cols:
+        c.execute("ALTER TABLE tracks ADD COLUMN download_type TEXT DEFAULT 'audio'")
+    if 'download_format' not in cols:
+        c.execute("ALTER TABLE tracks ADD COLUMN download_format TEXT DEFAULT 'mp3'")
+    if 'download_quality' not in cols:
+        c.execute("ALTER TABLE tracks ADD COLUMN download_quality TEXT DEFAULT 'best'")
+    if 'video_codec' not in cols:
+        c.execute("ALTER TABLE tracks ADD COLUMN video_codec TEXT DEFAULT 'auto'")
 
     c.execute("""
         UPDATE tracks
@@ -105,7 +113,10 @@ def download(row, c, track_id):
             c.commit()
             heartbeat(c, 'postprocessing:' + track_id)
 
-    download_type = row['source_type'] or 'audio'
+    download_type = row['download_type'] or row['source_type'] or 'audio'
+    download_format = row['download_format'] or ('mp3' if download_type == 'audio' else 'any')
+    download_quality = row['download_quality'] or 'best'
+    video_codec = row['video_codec'] or 'auto'
     log_lines = []
 
     class YTDLPLogger:
@@ -120,9 +131,6 @@ def download(row, c, track_id):
             log_lines.append('[error] ' + msg)
 
     opts = {
-        # Do not force bestaudio/best here. YouTube can expose different
-        # format sets depending on the player client; yt-dlp's own default
-        # selector has the correct fallback behavior.
         'outtmpl': output,
         'noplaylist': True,
         'quiet': False,
@@ -130,26 +138,42 @@ def download(row, c, track_id):
         'logger': YTDLPLogger(),
         'verbose': True,
         'progress_hooks': [progress_hook],
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': FMT,
-            'preferredquality': BITRATE,
-        }],
-        'writethumbnail': False,
-        'embedmetadata': True,
         'overwrites': True,
+        'embedmetadata': True,
     }
 
     if download_type == 'audio':
+        audio_format = download_format if download_format in {'m4a','mp3','opus','wav','flac'} else 'mp3'
+        audio_quality = download_quality if download_quality in {'0','128','192','256','320','best'} else '320'
+        opts['format'] = f'bestaudio[ext={audio_format}]/bestaudio/best'
         opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
-            'preferredcodec': FMT,
-            'preferredquality': BITRATE,
+            'preferredcodec': audio_format,
+            'preferredquality': 0 if audio_quality == 'best' else audio_quality,
         }]
+        if audio_format != 'wav':
+            opts['writethumbnail'] = True
+            opts['postprocessors'] += [
+                {'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg', 'when': 'before_dl'},
+                {'key': 'FFmpegMetadata'},
+                {'key': 'EmbedThumbnail'},
+            ]
     else:
-        opts['format'] = 'bestvideo+bestaudio/best'
+        quality = download_quality if download_quality in {'best','2160','1440','1080','720','480','360'} else 'best'
+        height = '' if quality == 'best' else f'[height<={quality}]'
+        vf = '' if download_format == 'any' else '[ext=mp4]'
+        codec_map = {
+            'h264': "[vcodec~='^(h264|avc)']",
+            'h265': "[vcodec~='^(h265|hevc)']",
+            'av1': "[vcodec~='^av0?1']",
+            'vp9': "[vcodec~='^vp0?9']",
+        }
+        codec_filter = codec_map.get(video_codec, '')
+        vsel = f'bestvideo{codec_filter}{height}{vf}'
+        if download_format == 'ios':
+            vsel = f"bestvideo[vcodec~='^((he|a)vc|h26[45])']{height}"
+        opts['format'] = f'{vsel}+bestaudio[ext=m4a]/{vsel}+bestaudio/best{height}{vf}'
         opts['merge_output_format'] = 'mp4'
-
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         result = ydl.download([url])
