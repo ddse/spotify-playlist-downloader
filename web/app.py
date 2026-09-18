@@ -75,8 +75,9 @@ def search_youtube(q:str='',page:int=1,limit:int=10):
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.post('/api/download')
-def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1')):
+def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),source_mode:str=Form('single'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1')):
     download_type = download_type if download_type in ('audio', 'video', 'captions', 'thumbnail') else 'audio'
+    source_mode = source_mode if source_mode in {'single','playlist','channel'} else 'single'
     audio_formats = {'m4a','mp3','opus','wav','flac'}
     video_formats = {'any','mp4','ios'}
     audio_quality = {'0','128','192','256','320','best'}
@@ -108,10 +109,10 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
     start = 1 if str(auto_start).lower() in {'1','true','on','yes'} else 0
     key=('yt:'+youtube_id if youtube_id else 'url:'+secrets.token_hex(12))+':'+download_type+':'+download_format+':'+download_quality+':'+video_codec+':'+folder+':'+str(item_limit)
     c=db()
-    c.execute('''INSERT INTO tracks(spotify_id,title,artists,album,spotify_url,status,progress,error,source_type,source_url,download_type,download_format,download_quality,video_codec,download_folder,thumbnail,subtitle,subtitle_lang,subtitle_mode,playlist_item_limit,split_chapters,auto_start,priority)
+    c.execute('''INSERT INTO tracks(spotify_id,title,artists,album,spotify_url,status,progress,error,source_type,source_url,download_type,download_format,download_quality,video_codec,download_folder,source_mode,thumbnail,subtitle_lang,subtitle_mode,playlist_item_limit,split_chapters,auto_start,priority)
       VALUES(?,?,?,?,?,'queued',0,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
       ON CONFLICT(spotify_id) DO UPDATE SET title=excluded.title,artists=excluded.artists,album=excluded.album,source_type=excluded.source_type,source_url=excluded.source_url,download_type=excluded.download_type,download_format=excluded.download_format,download_quality=excluded.download_quality,video_codec=excluded.video_codec,download_folder=excluded.download_folder,thumbnail=excluded.thumbnail,subtitle=excluded.subtitle,subtitle_lang=excluded.subtitle_lang,subtitle_mode=excluded.subtitle_mode,playlist_item_limit=excluded.playlist_item_limit,split_chapters=excluded.split_chapters,auto_start=excluded.auto_start,status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,error=NULL,updated_at=CURRENT_TIMESTAMP''',
-      (key,title,artists,album,source_url,download_type,source_url,download_type,download_format,download_quality,video_codec,folder,thumb,subs,subtitle_lang,subtitle_mode,item_limit,chapters,start))
+      (key,title,artists,album,source_url,download_type,source_url,download_type,download_format,download_quality,video_codec,folder,source_mode,thumb,subs,subtitle_lang,subtitle_mode,item_limit,chapters,start))
     c.commit(); c.close()
     return RedirectResponse('/',303)
 
@@ -126,6 +127,11 @@ def pause_queue(track_id:str):
 @app.post('/api/queue/prioritize/{track_id}')
 def prioritize_queue(track_id:str):
     c=db(); c.execute("UPDATE tracks SET priority=priority+1,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status IN ('queued','paused')",(track_id,)); c.commit(); c.close(); return {'ok':True}
+
+@app.post('/api/import/youtube')
+def import_youtube(source_url:str=Form(...),source_mode:str=Form('playlist'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('320'),download_folder:str=Form('YouTube'),playlist_item_limit:str=Form('0')):
+    title = source_url.rstrip('/').split('/')[-1].split('?')[0] or 'YouTube import'
+    return download(source_url=source_url,title=title,artists='YouTube',album=source_mode,youtube_id='',source_mode=source_mode,download_type=download_type,download_format=download_format,download_quality=download_quality,video_codec='auto',download_folder=download_folder,thumbnail='1',subtitle='0',subtitle_lang='ja,en',subtitle_mode='prefer_manual',playlist_item_limit=playlist_item_limit,split_chapters='0',auto_start='1')
 
 @app.post('/api/retry/{track_id}')
 def retry(track_id:str):
