@@ -6,6 +6,8 @@ import threading
 from search import serve as serve_search_api
 from yt_dlp.utils import DownloadError
 
+import wireguard as manager
+
 import re
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -262,7 +264,7 @@ while True:
         heartbeat(c)
 
         row = c.execute(
-            "SELECT * FROM tracks WHERE status='queued' AND source_url IS NOT NULL ORDER BY created_at LIMIT 1"
+            "SELECT * FROM tracks WHERE status='queued' AND source_url IS NOT NULL ORDER BY priority DESC, created_at LIMIT 1"
         ).fetchone()
 
         if not row:
@@ -278,8 +280,12 @@ while True:
         c.commit()
         heartbeat(c, 'starting:' + track_id)
 
+        use_wireguard = bool(row['wireguard'])
         try:
-            download(row, c, track_id)
+            manager.run_download(
+                use_wireguard,
+                lambda: download(row, c, track_id),
+            )
             c.execute(
                 "UPDATE tracks SET status='completed',progress=100,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
                 (track_id,),
