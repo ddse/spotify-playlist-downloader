@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import yt_dlp
 
-from wireguard import manager
+import wireguard as manager
 
 PAGE_SIZE = 10
 MAX_SEARCH_RESULTS = 50
