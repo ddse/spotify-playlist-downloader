@@ -20,17 +20,12 @@ def search(query: str, page: int = 1, limit: int = PAGE_SIZE, source: str = "you
     if not provider:
         raise ValueError(f"unsupported search provider: {source}")
 
-    # WireGuard is needed for YouTube in this deployment, but routing Zing MP3
-    # and NhacCuaTui through the VPN can cause geo/rate-limit/challenge
-    # responses. Keep Vietnamese provider searches on the normal network path.
-    use_wireguard = (
-        manager.setting_enabled() if source == "youtube" and wireguard is None
-        else bool(wireguard) if source == "youtube"
-        else False
-    )
-    if source == "youtube":
-        return manager.run(use_wireguard, lambda: provider(query, page, limit))
-    return provider(query, page, limit)
+    # The UI explicitly passes the current WireGuard setting. When omitted,
+    # fall back to the persisted worker setting. All search providers must
+    # use the same routing policy so enabling WireGuard consistently affects
+    # YouTube, Zing MP3, and NhacCuaTui.
+    use_wireguard = manager.setting_enabled() if wireguard is None else bool(wireguard)
+    return manager.run(use_wireguard, lambda: provider(query, page, limit))
 
 
 class Handler(BaseHTTPRequestHandler):
