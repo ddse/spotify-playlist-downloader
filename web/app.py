@@ -225,3 +225,28 @@ def jobs():
 def history():
     c=db(); rows=c.execute("SELECT * FROM tracks WHERE status IN ('completed','failed') ORDER BY updated_at DESC LIMIT 200").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
 
+@app.get('/api/files/{track_id}')
+def download_file(track_id:str):
+    c=db(); row=c.execute('SELECT * FROM tracks WHERE spotify_id=? AND status=\'completed\'',(track_id,)).fetchone(); c.close()
+    if not row: raise HTTPException(404,'completed file not found')
+    music=Path(os.getenv('MUSIC_DIR','/music')).resolve()
+    artist=(row['artists'] or 'Unknown Artist').replace('/','_')
+    album=(row['album'] or 'YouTube').replace('/','_')
+    title=(row['title'] or 'Unknown Title').replace('/','_')
+    custom=(row['download_folder'] or '').strip()
+    folder=(music / custom) if custom else (music / artist / album)
+    folder=folder.resolve()
+    if music not in folder.parents and folder != music: raise HTTPException(400,'invalid download folder')
+    preferred=[]
+    fmt=(row['download_format'] or '').lower()
+    if fmt in {'mp3','m4a','opus','wav','flac','mp4'}: preferred.append(fmt)
+    preferred += ['mp3','m4a','opus','flac','wav','mp4','webm','mkv','mov']
+    for ext in dict.fromkeys(preferred):
+        p=folder / f'{title}.{ext}'
+        if p.is_file(): return FileResponse(p, filename=p.name)
+    matches=sorted(folder.glob(f'{title}.*'), key=lambda p:p.stat().st_mtime, reverse=True)
+    for p in matches:
+        if p.is_file() and p.suffix.lower() not in {'.jpg','.jpeg','.png','.webp','.vtt','.srt','.ass','.lrc'}:
+            return FileResponse(p, filename=p.name)
+    raise HTTPException(404,'completed file not found')
+
