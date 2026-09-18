@@ -76,8 +76,9 @@ def search_youtube(q:str=''):
 
 @app.post('/api/download')
 def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form('')):
-    key='yt:'+youtube_id if youtube_id else 'url:'+secrets.token_hex(12)
-    c=db(); c.execute('''INSERT INTO tracks(spotify_id,title,artists,album,spotify_url,status,progress,error,source_type,source_url) VALUES(?,?,?,?,?,'queued',0,NULL,'youtube',?) ON CONFLICT(spotify_id) DO UPDATE SET title=excluded.title,artists=excluded.artists,album=excluded.album,source_type='youtube',source_url=excluded.source_url,status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,error=NULL,updated_at=CURRENT_TIMESTAMP''',(key,title,artists,album,source_url,source_url)); c.commit(); c.close(); return RedirectResponse('/',303)
+    download_type = download_type if download_type in ('audio', 'video') else 'audio'
+    key=('yt:'+youtube_id if youtube_id else 'url:'+secrets.token_hex(12))+':'+download_type
+    c=db(); c.execute('''INSERT INTO tracks(spotify_id,title,artists,album,spotify_url,status,progress,error,source_type,source_url) VALUES(?,?,?,?,?,'queued',0,NULL,'youtube',?) ON CONFLICT(spotify_id) DO UPDATE SET title=excluded.title,artists=excluded.artists,album=excluded.album,source_type=excluded.source_type,source_url=excluded.source_url,status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,error=NULL,updated_at=CURRENT_TIMESTAMP''',(key,title,artists,album,source_url,download_type,source_url)); c.commit(); c.close(); return RedirectResponse('/',303)
 
 @app.post('/api/retry/{track_id}')
 def retry(track_id:str):
