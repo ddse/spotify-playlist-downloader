@@ -106,6 +106,21 @@ class Handler(BaseHTTPRequestHandler):
                 "error": f"{type(exc).__name__}: {exc}",
             })
 
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/wireguard":
+            return self._json(404, {"error": "not found"})
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length).decode("utf-8") if length else ""
+            params = parse_qs(body)
+            enabled = params.get("enabled", ["0"])[0].lower() in {"1", "true", "yes", "on"}
+            manager.set_enabled(enabled)
+            return self._json(200, manager.status())
+        except Exception as exc:
+            return self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+
     def log_message(self, fmt, *args):
         print(f"[worker-api] {fmt % args}", flush=True)
 
