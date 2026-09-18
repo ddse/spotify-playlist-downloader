@@ -202,6 +202,16 @@ class WireGuardManagerTests(unittest.TestCase):
         self.assertTrue(result["route_active"])
         self.assertFalse(result["handshake_recent"])
         self.assertFalse(result["vpn_route"])
+        self.assertEqual(result["status"], "routing")
+        self.assertIn("no recent peer handshake", result["status_detail"])
+
+    def test_status_reports_disconnected_when_interface_is_down(self):
+        with patch.object(self.wireguard, "is_up", return_value=False):
+            result = self.wireguard.status()
+
+        self.assertFalse(result["enabled"])
+        self.assertEqual(result["status"], "disconnected")
+        self.assertIn("interface is down", result["status_detail"])
 
 
 if __name__ == "__main__":

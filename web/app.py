@@ -123,11 +123,52 @@ async def wireguard_settings():
                 f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard"
             )
             response.raise_for_status()
-            result.update(response.json())
+            wg = response.json()
+            result.update({
+                'enabled': bool(wg.get('enabled')),
+                'interface': wg.get('interface', 'wg0'),
+                'config_path': wg.get('config_path', os.getenv('WG_CONFIG', '/etc/wireguard/wg0.conf')),
+                'config_exists': bool(wg.get('config_exists')),
+                'status': wg.get('status') or ('connected' if wg.get('vpn_route') else ('routing' if wg.get('enabled') else 'disconnected')),
+                'status_detail': wg.get('status_detail', ''),
+                'vpn_route': bool(wg.get('vpn_route')),
+                'route_active': bool(wg.get('route_active')),
+                'handshake_recent': bool(wg.get('handshake_recent')),
+                'public_ip': wg.get('public_ip', ''),
+                'receive_bytes': int(wg.get('receive_bytes', 0)),
+                'send_bytes': int(wg.get('send_bytes', 0)),
+                'peer_count': int(wg.get('peer_count', 0)),
+            })
             result['enabled'] = wireguard_enabled()
     except Exception as e:
         result['detail'] = str(e)
     return result
+
+
+@app.post('/api/settings/wireguard')
+async def wireguard_toggle(enabled: bool = Form(...)):
+    """Persist and apply the WireGuard preference through the worker."""
+    c = db()
+    value = '1' if enabled else '0'
+    c.execute(
+        "INSERT INTO app_settings(key,value) VALUES('wireguard_enabled',?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (value,),
+    )
+    c.commit()
+    c.close()
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard",
+                data={'enabled': value},
+            )
+            response.raise_for_status()
+            result = response.json()
+            result['enabled'] = enabled
+            return result
+    except Exception as e:
+        return {'enabled': enabled, 'status': 'unavailable', 'error': str(e)}
 
 
 @app.get('/api/settings/connections')
@@ -190,7 +231,7 @@ async def services():
                 'interface':wg.get('interface','wg0'),
                 'config_path':wg.get('config_path',os.getenv('WG_CONFIG','/etc/wireguard/wg0.conf')),
                 'config_exists':bool(wg.get('config_exists')),
-                'status':'connected' if wg.get('vpn_route') else ('routing' if wg.get('enabled') else 'disconnected'),
+                'status':wg.get('status') or ('connected' if wg.get('vpn_route') else ('routing' if wg.get('enabled') else 'disconnected')),
                 'vpn_route':bool(wg.get('vpn_route')),
                 'route_active':bool(wg.get('route_active')),
                 'handshake_recent':bool(wg.get('handshake_recent')),
@@ -198,6 +239,7 @@ async def services():
                 'receive_bytes':int(wg.get('receive_bytes',0)),
                 'send_bytes':int(wg.get('send_bytes',0)),
                 'peer_count':int(wg.get('peer_count',0)),
+                'status_detail':wg.get('status_detail',''),
             }
     except Exception as e:
         result['wireguard']['status']='unavailable'
