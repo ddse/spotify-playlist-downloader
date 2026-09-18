@@ -6,6 +6,44 @@ import threading
 from search import serve as serve_search_api
 from yt_dlp.utils import DownloadError
 
+import re
+import urllib.request
+import xml.etree.ElementTree as ET
+from urllib.parse import urlparse
+
+def is_nhaccuatui(url):
+    try:
+        host = (urlparse(url).hostname or '').lower()
+        return host == 'nhaccuatui.com' or host.endswith('.nhaccuatui.com')
+    except Exception:
+        return False
+
+def resolve_nhaccuatui(url):
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        html = r.read().decode('utf-8', errors='ignore')
+    match = re.search(r'player\.peConfig\.xmlURL\s*=\s*"([^"]+)"', html)
+    if not match:
+        raise RuntimeError('NhacCuaTui: player XML URL not found')
+    xml_url = match.group(1).replace('\\/', '/')
+    req = urllib.request.Request(xml_url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        xml_data = r.read()
+    root = ET.fromstring(xml_data)
+    tracks = root.findall('.//track')
+    if not tracks:
+        raise RuntimeError('NhacCuaTui: no track found in XML')
+    track = tracks[0]
+    def value(name):
+        node = track.find(name)
+        return (node.text or '').strip() if node is not None else ''
+    direct = value('location')
+    title = value('title') or url.rstrip('/').split('/')[-1].split('.')[0]
+    if not direct:
+        raise RuntimeError('NhacCuaTui: direct audio URL not found')
+    return {'url': direct, 'title': title}
+
+
 DB_PATH = os.getenv('DB_PATH', '/state/app.db')
 MUSIC_DIR = os.getenv('MUSIC_DIR', '/music')
 FMT = os.getenv('AUDIO_FORMAT', 'mp3')
@@ -31,10 +69,44 @@ def heartbeat(c, detail='idle'):
     c.commit()
 
 
+def download_nhaccuatui(row, c, track_id):
+    resolved = resolve_nhaccuatui(row['source_url'])
+    Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
+    artist = (row['artists'] or 'NhacCuaTui').replace('/', '_')
+    album = (row['album'] or 'NhacCuaTui').replace('/', '_')
+    title = (row['title'] or resolved['title'] or 'Unknown Title').replace('/', '_')
+    custom_folder = (row['download_folder'] or '').strip()
+    folder = Path(MUSIC_DIR) / custom_folder if custom_folder else Path(MUSIC_DIR) / artist / album
+    folder.mkdir(parents=True, exist_ok=True)
+    output = folder / f'{title}.mp3'
+    req = urllib.request.Request(resolved['url'], headers={'User-Agent': 'Mozilla/5.0',
+                                                            'Referer': row['source_url']})
+    with urllib.request.urlopen(req, timeout=30) as response, open(output, 'wb') as fp:
+        total = int(response.headers.get('Content-Length') or 0)
+        downloaded = 0
+        last_update = 0.0
+        while True:
+            chunk = response.read(1024 * 256)
+            if not chunk:
+                break
+            fp.write(chunk)
+            downloaded += len(chunk)
+            now = time.time()
+            if now - last_update >= 1:
+                percent = int(downloaded * 100 / total) if total else 1
+                c.execute('UPDATE tracks SET progress=?,downloaded_bytes=?,total_bytes=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
+                          (max(1, min(99, percent)), downloaded, total, track_id))
+                c.commit()
+                heartbeat(c, 'downloading:' + track_id)
+                last_update = now
+
 def download(row, c, track_id):
     Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
     url = row['source_url']
     source_mode = row['source_mode'] or 'single'
+    if is_nhaccuatui(url):
+        download_nhaccuatui(row, c, track_id)
+        return
     if not url:
         raise RuntimeError('No download source selected')
 
