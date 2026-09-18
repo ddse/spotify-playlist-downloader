@@ -1,4 +1,4 @@
-import os, sqlite3, time, traceback
+import os, time, traceback
 from pathlib import Path
 
 import yt_dlp
@@ -13,67 +13,13 @@ BITRATE = os.getenv('AUDIO_BITRATE', '320K')
 
 
 def conn():
-    c = sqlite3.connect(DB_PATH, timeout=30)
-    c.row_factory = sqlite3.Row
-    return c
+    from database import db
+    return db()
 
 
 def init(c):
-    c.execute('''CREATE TABLE IF NOT EXISTS tracks(
-        spotify_id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        artists TEXT NOT NULL,
-        album TEXT,
-        status TEXT NOT NULL DEFAULT 'pending_source',
-        progress INTEGER DEFAULT 0,
-        error TEXT,
-        source_type TEXT DEFAULT 'youtube',
-        source_url TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS service_heartbeat(
-        service TEXT PRIMARY KEY, heartbeat REAL NOT NULL, detail TEXT
-    )''')
-    cols = {r[1] for r in c.execute('PRAGMA table_info(tracks)').fetchall()}
-    if 'source_type' not in cols:
-        c.execute("ALTER TABLE tracks ADD COLUMN source_type TEXT DEFAULT 'spotify'")
-    if 'spotify_url' not in cols:
-        c.execute("ALTER TABLE tracks ADD COLUMN spotify_url TEXT")
-    if 'source_url' not in cols:
-        c.execute("ALTER TABLE tracks ADD COLUMN source_url TEXT")
-    if 'progress' not in cols:
-        c.execute("ALTER TABLE tracks ADD COLUMN progress INTEGER DEFAULT 0")
-    if 'download_type' not in cols:
-        c.execute("ALTER TABLE tracks ADD COLUMN download_type TEXT DEFAULT 'audio'")
-    if 'download_format' not in cols:
-        c.execute("ALTER TABLE tracks ADD COLUMN download_format TEXT DEFAULT 'mp3'")
-    if 'download_quality' not in cols:
-        c.execute("ALTER TABLE tracks ADD COLUMN download_quality TEXT DEFAULT 'best'")
-    if 'video_codec' not in cols:
-        c.execute("ALTER TABLE tracks ADD COLUMN video_codec TEXT DEFAULT 'auto'")
-    if 'download_folder' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN download_folder TEXT DEFAULT ''")
-    if 'thumbnail' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN thumbnail INTEGER DEFAULT 1")
-    if 'subtitle' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN subtitle INTEGER DEFAULT 0")
-    if 'subtitle_lang' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN subtitle_lang TEXT DEFAULT 'ja,en'")
-    if 'subtitle_mode' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN subtitle_mode TEXT DEFAULT 'prefer_manual'")
-    if 'split_chapters' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN split_chapters INTEGER DEFAULT 0")
-    if 'auto_start' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN auto_start INTEGER DEFAULT 1")
-    if 'priority' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN priority INTEGER DEFAULT 0")
-    if 'source_mode' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN source_mode TEXT DEFAULT 'single'")
-    if 'playlist_item_limit' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN playlist_item_limit INTEGER DEFAULT 0")
-    if 'downloaded_bytes' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN downloaded_bytes INTEGER DEFAULT 0")
-    if 'total_bytes' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN total_bytes INTEGER DEFAULT 0")
-    if 'download_speed' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN download_speed TEXT DEFAULT ''")
-    if 'eta' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN eta TEXT DEFAULT ''")
-
-    c.execute("""
-        UPDATE tracks
-        SET status='queued', progress=0, error=NULL, updated_at=CURRENT_TIMESTAMP
-        WHERE status='downloading' AND source_url IS NOT NULL
-    """)
-    c.commit()
-
+    from database import init_db
+    init_db(c)
 
 def heartbeat(c, detail='idle'):
     c.execute(
