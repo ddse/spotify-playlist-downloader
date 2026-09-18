@@ -41,6 +41,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, manager.status())
             except Exception as exc:
                 return self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+        if parsed.path == "/api/wireguard/files":
+            try:
+                import glob
+                files = sorted(glob.glob("/etc/wireguard/*.conf"))
+                return self._json(200, {
+                    "directory": "/etc/wireguard",
+                    "files": [
+                        {"path": path, "name": path.rsplit("/", 1)[-1]}
+                        for path in files
+                    ],
+                })
+            except Exception as exc:
+                return self._json(500, {"directory": "/etc/wireguard", "files": [], "error": f"{type(exc).__name__}: {exc}"})
         if parsed.path != "/api/search/youtube":
             return self._json(404, {"error": "not found"})
 
