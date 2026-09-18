@@ -2,6 +2,8 @@ import os, sqlite3, time, traceback
 from pathlib import Path
 
 import yt_dlp
+import threading
+from search import serve as serve_search_api
 from yt_dlp.utils import DownloadError
 
 DB_PATH = os.getenv('DB_PATH', '/state/app.db')
@@ -224,6 +226,8 @@ def format_error(exc, logger_text=''):
         parts.append(traceback.format_exc().strip())
     return '\n\n'.join(p for p in parts if p)[-20000:]
 
+
+threading.Thread(target=serve_search_api, name='search-api', daemon=True).start()
 
 while True:
     c = None
