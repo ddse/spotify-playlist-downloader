@@ -49,6 +49,75 @@ HOST = os.getenv("WORKER_API_HOST", "0.0.0.0")
 PORT = int(os.getenv("WORKER_API_PORT", "8090"))
 
 
+def search_zingmp3(query: str, page: int, limit: int):
+    import json as _json
+    from urllib.parse import quote
+    api_url = f"https://ac.zingmp3.vn/v1/web/search?num={limit}&page={page}&query={quote(query)}"
+    req = urllib.request.Request(api_url, headers={
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://zingmp3.vn/',
+        'Accept': 'application/json',
+    })
+    with urllib.request.urlopen(req, timeout=20) as r:
+        data = _json.loads(r.read().decode('utf-8', errors='ignore'))
+    items = []
+    for section in (data.get('data') or {}).get('items') or []:
+        if not isinstance(section, dict):
+            continue
+        for entry in section.get('song') or section.get('items') or []:
+            if not isinstance(entry, dict):
+                continue
+            song_id = entry.get('encodeId') or entry.get('id')
+            if not song_id:
+                continue
+            items.append({
+                'id': song_id,
+                'title': entry.get('title') or '',
+                'channel': ', '.join(a.get('name','') for a in entry.get('artists') or []),
+                'duration': entry.get('duration'),
+                'url': f"https://zingmp3.vn/bai-hat/{entry.get('alias','')}/{song_id}.html",
+                'thumbnail': entry.get('thumbnailM') or entry.get('thumbnail') or '',
+                'source': 'zingmp3',
+            })
+    return {'items': items[:limit], 'page': page, 'limit': limit,
+            'has_more': len(items) >= limit}
+
+
+def search_nhaccuatui(query: str, page: int, limit: int):
+    from html import unescape
+    from urllib.parse import quote
+    search_url = f"https://www.nhaccuatui.com/tim-kiem?q={quote(query)}"
+    req = urllib.request.Request(search_url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        html = r.read().decode('utf-8', errors='ignore')
+    # NCT search pages expose song links in href attributes.
+    pattern = re.compile(r'href=["\'](https?://(?:www\.)?nhaccuatui\.com/bai-hat/[^"\']+\.html)["\'][^>]*>(.*?)</a>',
+                         re.I | re.S)
+    seen, items = set(), []
+    for url, raw_title in pattern.findall(html):
+        if url in seen:
+            continue
+        seen.add(url)
+        title = re.sub(r'<[^>]+>', ' ', raw_title)
+        title = re.sub(r'\\s+', ' ', unescape(title)).strip()
+        if not title:
+            continue
+        items.append({
+            'id': url,
+            'title': title,
+            'channel': 'NhacCuaTui',
+            'duration': None,
+            'url': url,
+            'thumbnail': '',
+            'source': 'nhaccuatui',
+        })
+        if len(items) >= page * limit:
+            break
+    start = (page - 1) * limit
+    return {'items': items[start:start + limit], 'page': page, 'limit': limit,
+            'has_more': len(items) > start + limit or len(items) == page * limit}
+
+
 def search(query: str, page: int = 1, limit: int = PAGE_SIZE):
     query = query.strip()
     page = max(1, int(page))
@@ -56,30 +125,15 @@ def search(query: str, page: int = 1, limit: int = PAGE_SIZE):
     if not query:
         return {"items": [], "page": page, "limit": limit, "has_more": False}
 
-    # Paste a direct Zing MP3 / NhacCuaTui URL into the existing search box.
-    if query.startswith(('http://', 'https://')):
-        if is_nhaccuatui(query):
-            item = resolve_nhaccuatui(query)
-            return {"items": [{"id": query, "title": item["title"], "channel": "NhacCuaTui",
-                               "duration": None, "url": query, "thumbnail": ""}],
-                    "page": 1, "limit": 1, "has_more": False}
-        try:
-            with yt_dlp.YoutubeDL({"extract_flat": True, "skip_download": True, "quiet": True,
-                                   "no_warnings": True, "noplaylist": True}) as ydl:
-                entry = ydl.extract_info(query, download=False)
-            if entry:
-                return {"items": [{"id": entry.get("id") or query,
-                                   "title": entry.get("title") or query,
-                                   "channel": entry.get("channel") or entry.get("uploader") or "",
-                                   "duration": entry.get("duration"),
-                                   "url": entry.get("webpage_url") or query,
-                                   "thumbnail": entry.get("thumbnail") or ""}],
-                        "page": 1, "limit": 1, "has_more": False}
-        except Exception as exc:
-            return {"items": [], "page": 1, "limit": 1, "has_more": False,
-                    "error": f"{type(exc).__name__}: {exc}"}
+    # Search native sources by keyword. Zing MP3 uses its public search API;
+    # NhacCuaTui uses its public search page and extracts song URLs.
+    if source == 'zingmp3':
+        return search_zingmp3(query, page, limit)
+    if source == 'nhaccuatui':
+        return search_nhaccuatui(query, page, limit)
 
     end = min(MAX_SEARCH_RESULTS, page * limit)
+    source = 'youtube'
     opts = {
         "extract_flat": True,
         "skip_download": True,
