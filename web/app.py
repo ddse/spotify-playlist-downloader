@@ -55,9 +55,28 @@ def get_wireguard_setting():
     return {'enabled': wireguard_enabled()}
 
 @app.post('/api/settings/wireguard')
-def set_wireguard_setting(enabled: bool = Form(False)):
-    # This is the default for newly queued jobs/searches. Existing jobs keep their route.
-    c=db(); value='1' if enabled else '0'; c.execute("INSERT INTO app_settings(key,value) VALUES('wireguard_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(value,)); c.commit(); c.close()
+async def set_wireguard_setting(enabled: bool = Form(False)):
+    # Persist the default for newly queued jobs and immediately switch the
+    # single worker's network route. The worker serializes this with downloads.
+    value='1' if enabled else '0'
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            response = await client.post(
+                f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard",
+                data={'enabled': '1' if enabled else '0'},
+            )
+            response.raise_for_status()
+    except Exception as e:
+        raise HTTPException(503, f'Worker WireGuard toggle failed: {e}')
+
+    c=db()
+    c.execute(
+        "INSERT INTO app_settings(key,value) VALUES('wireguard_enabled',?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (value,),
+    )
+    c.commit()
+    c.close()
     return {'ok': True, 'enabled': bool(enabled)}
 
 @app.get('/api/spotify/login')
