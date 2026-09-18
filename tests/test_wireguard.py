@@ -59,7 +59,9 @@ class WireGuardManagerTests(unittest.TestCase):
         self.wireguard = wireguard
         self.tmp = tempfile.TemporaryDirectory()
         self.config = Path(self.tmp.name) / "wg0.conf"
-        self.config.write_text("[Interface]\nPrivateKey = test\nAddress = 10.0.0.2/24\n")
+        self.config.write_text(
+            "[Interface]\nPrivateKey = test\nAddress = 10.0.0.2/24\n"
+        )
         self.old_config = wireguard.CONFIG
         wireguard.CONFIG = str(self.config)
         wireguard._state = False
@@ -70,14 +72,18 @@ class WireGuardManagerTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_enable_runs_wg_quick_up_only_when_down(self):
-        with patch.object(self.wireguard, "is_up", side_effect=[False, True]),              patch.object(self.wireguard, "_run") as run:
+        with patch.object(
+            self.wireguard, "is_up", side_effect=[False, True]
+        ), patch.object(self.wireguard, "_run") as run:
             self.wireguard.set_enabled(True)
             self.wireguard.set_enabled(True)
 
         run.assert_called_once_with("wg-quick", "up", str(self.config))
 
     def test_disable_runs_wg_quick_down_only_when_up(self):
-        with patch.object(self.wireguard, "is_up", return_value=True),              patch.object(self.wireguard, "_run") as run:
+        with patch.object(
+            self.wireguard, "is_up", return_value=True
+        ), patch.object(self.wireguard, "_run") as run:
             self.wireguard.set_enabled(False)
 
         run.assert_called_once_with("wg-quick", "down", str(self.config))
@@ -88,24 +94,79 @@ class WireGuardManagerTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "WireGuard config not found"):
             self.wireguard.set_enabled(True)
 
+    def test_route_status_detects_wg_quick_policy_route(self):
+        result = type("Result", (), {
+            "stdout": (
+                "default via 172.18.0.1 dev eth0\n"
+                "default dev wg0 table 51820 proto static\n"
+                "10.0.0.0/24 dev wg0 proto kernel scope link src 10.0.0.2\n"
+            )
+        })()
+
+        with patch.object(
+            self.wireguard.subprocess, "run", return_value=result
+        ) as run:
+            active, routes = self.wireguard._route_status()
+
+        self.assertTrue(active)
+        self.assertEqual(len(routes), 3)
+        run.assert_called_once_with(
+            ["ip", "-4", "route", "show", "table", "all"],
+            check=True,
+            stdout=self.wireguard.subprocess.PIPE,
+            stderr=self.wireguard.subprocess.PIPE,
+            text=True,
+        )
+
+    def test_route_status_ignores_default_route_on_other_interface(self):
+        result = type("Result", (), {
+            "stdout": (
+                "default via 172.18.0.1 dev eth0\n"
+                "192.168.1.0/24 dev eth0 proto kernel scope link\n"
+            )
+        })()
+
+        with patch.object(
+            self.wireguard.subprocess, "run", return_value=result
+        ):
+            active, routes = self.wireguard._route_status()
+
+        self.assertFalse(active)
+        self.assertEqual(len(routes), 2)
+
+    def test_route_status_handles_ip_command_failure(self):
+        with patch.object(
+            self.wireguard.subprocess,
+            "run",
+            side_effect=self.wireguard.subprocess.CalledProcessError(
+                1, ["ip", "-4", "route", "show", "table", "all"]
+            ),
+        ):
+            active, routes = self.wireguard._route_status()
+
+        self.assertFalse(active)
+        self.assertEqual(routes, [])
+
     def test_status_reports_active_vpn_when_route_handshake_and_public_ip_are_valid(self):
-        with patch.object(self.wireguard, "is_up", return_value=True),              patch.object(
-                 self.wireguard,
-                 "_route_status",
-                 return_value=(True, ["default dev wg0"]),
-             ),              patch.object(
-                 self.wireguard,
-                 "_handshake_status",
-                 return_value=(True, [{"public_key": "peer", "age_seconds": 5}]),
-             ),              patch.object(self.wireguard, "_public_ip", return_value="203.0.113.10"),              patch.object(
-                 self.wireguard.subprocess,
-                 "run",
-                 return_value=type(
-                     "Result",
-                     (),
-                     {"stdout": "peer 1024 2048\n"},
-                 )(),
-             ):
+        with patch.object(self.wireguard, "is_up", return_value=True), patch.object(
+            self.wireguard,
+            "_route_status",
+            return_value=(True, ["default dev wg0"]),
+        ), patch.object(
+            self.wireguard,
+            "_handshake_status",
+            return_value=(True, [{"public_key": "peer", "age_seconds": 5}]),
+        ), patch.object(
+            self.wireguard, "_public_ip", return_value="203.0.113.10"
+        ), patch.object(
+            self.wireguard.subprocess,
+            "run",
+            return_value=type(
+                "Result",
+                (),
+                {"stdout": "peer 1024 2048\n"},
+            )(),
+        ):
             result = self.wireguard.status()
 
         self.assertTrue(result["enabled"])
@@ -116,39 +177,22 @@ class WireGuardManagerTests(unittest.TestCase):
         self.assertEqual(result["receive_bytes"], 1024)
         self.assertEqual(result["send_bytes"], 2048)
 
-    def test_route_status_detects_wg_quick_policy_route(self):
-        class Result:
-            def __init__(self, stdout):
-                self.stdout = stdout
-
-        def run(*args, **kwargs):
-            command = list(args)
-            if command[:5] == ["ip", "-4", "route", "show", "table"]:
-                return Result("default dev wg0 table 51820\n")
-            if command[:4] == ["ip", "-4", "rule"]:
-                return Result("32764: from all lookup main suppress_prefixlength 0\n")
-            raise AssertionError(f"unexpected command: {command}")
-
-        with patch.object(self.wireguard.subprocess, "run", side_effect=run):
-            active, routes = self.wireguard._route_status()
-
-        self.assertTrue(active)
-        self.assertEqual(routes, ["default dev wg0 table 51820"])
-
     def test_status_is_not_vpn_active_without_recent_handshake(self):
-        with patch.object(self.wireguard, "is_up", return_value=True),              patch.object(
-                 self.wireguard,
-                 "_route_status",
-                 return_value=(True, ["default dev wg0"]),
-             ),              patch.object(
-                 self.wireguard,
-                 "_handshake_status",
-                 return_value=(False, [{"public_key": "peer", "age_seconds": None}]),
-             ),              patch.object(self.wireguard, "_public_ip", return_value="203.0.113.10"),              patch.object(
-                 self.wireguard.subprocess,
-                 "run",
-                 return_value=type("Result", (), {"stdout": ""})(),
-             ):
+        with patch.object(self.wireguard, "is_up", return_value=True), patch.object(
+            self.wireguard,
+            "_route_status",
+            return_value=(True, ["default dev wg0"]),
+        ), patch.object(
+            self.wireguard,
+            "_handshake_status",
+            return_value=(False, [{"public_key": "peer", "age_seconds": None}]),
+        ), patch.object(
+            self.wireguard, "_public_ip", return_value="203.0.113.10"
+        ), patch.object(
+            self.wireguard.subprocess,
+            "run",
+            return_value=type("Result", (), {"stdout": ""})(),
+        ):
             result = self.wireguard.status()
 
         self.assertTrue(result["enabled"])

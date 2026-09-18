@@ -40,13 +40,13 @@ def test_search_input_is_safe_for_url_builders(monkeypatch):
 
 def test_nhaccuatui_parser_normalizes_results(monkeypatch):
     nct = load_provider("nhaccuatui")
-    html = b'''
+    html = '''
       <a href="https://www.nhaccuatui.com/bai-hat/test-song.XYZ.html">Test <b>Song</b></a>
       <a href="https://www.nhaccuatui.com/bai-hat/test-song.XYZ.html">duplicate</a>
     '''
 
     class Response:
-        def read(self): return html
+        def read(self): return html.encode('utf-8')
         def __enter__(self): return self
         def __exit__(self, *args): pass
 
@@ -105,12 +105,12 @@ def test_zingmp3_search_falls_back_to_legacy_endpoint(monkeypatch):
 
 def test_nhaccuatui_parser_supports_current_song_links(monkeypatch):
     nct = load_provider("nhaccuatui")
-    html = b'''
+    html = '''
       <a href="https://www.nhaccuatui.com/song/4ZPNUOHU7t?source=app"><span>Việt Nam Quê Hương Tôi</span></a>
       <a href="https://www.nhaccuatui.com/song/4ZPNUOHU7t?source=app"><span>duplicate</span></a>
     '''
     class Response:
-        def read(self): return html
+        def read(self): return html.encode('utf-8')
         def __enter__(self): return self
         def __exit__(self, *args): pass
     monkeypatch.setattr(nct.urllib.request, "urlopen", lambda *a, **k: Response())
@@ -121,13 +121,13 @@ def test_nhaccuatui_parser_supports_current_song_links(monkeypatch):
 
 def test_zingmp3_parser_supports_html_fallback(monkeypatch):
     zing = load_provider("zingmp3")
-    html = b'''
+    html = '''
       <a href="https://zingmp3.vn/bai-hat/viet-nam-que-huong-toi/ZWHTML01.html">
         <span>Việt Nam Quê Hương Tôi</span>
       </a>
     '''
     class Response:
-        def read(self): return html
+        def read(self): return html.encode('utf-8')
         def __enter__(self): return self
         def __exit__(self, *args): pass
     def fake_urlopen(req, timeout=20):
