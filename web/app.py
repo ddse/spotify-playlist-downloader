@@ -1,13 +1,15 @@
 import os, re, sqlite3, secrets, time
 import httpx
 from fastapi import FastAPI, Form, Request, Header, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from spotify import authorize_url, exchange, access_token, public_search, playlist_items, playlist_info
 from youtube import search as youtube_search
 
 DB_PATH=os.getenv('DB_PATH','/state/app.db'); SYNC_TOKEN=os.getenv('SYNC_TOKEN','')
 app=FastAPI(title='Music Downloader v3'); templates=Jinja2Templates(directory='templates')
+app.mount('/assets', StaticFiles(directory='static/assets'), name='assets')
 
 def db():
     c=sqlite3.connect(DB_PATH,timeout=30); c.row_factory=sqlite3.Row
@@ -49,9 +51,8 @@ def worker_state(c, service):
 def startup(): db().close()
 
 @app.get('/',response_class=HTMLResponse)
-def index(request:Request):
-    c=db(); tracks=c.execute('SELECT * FROM tracks ORDER BY created_at DESC LIMIT 100').fetchall(); playlists=c.execute('SELECT * FROM playlists ORDER BY name').fetchall(); connected=bool(c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='spotify_tokens'").fetchone() and c.execute('SELECT 1 FROM spotify_tokens WHERE id=1').fetchone()); c.close()
-    return templates.TemplateResponse('index.html',{'request':request,'tracks':tracks,'playlists':playlists,'spotify_connected':connected})
+def index():
+    return FileResponse('static/index.html')
 
 @app.get('/health')
 async def health(): return {'ok':True}
