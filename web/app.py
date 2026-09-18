@@ -72,11 +72,25 @@ def provider_row(c, provider):
 
 @app.get('/api/settings/wireguard')
 async def wireguard_settings():
-    """Return the persisted WireGuard preference used by the frontend."""
-    return {
+    """Return persisted preference plus live worker WireGuard status."""
+    result = {
         'enabled': wireguard_enabled(),
         'interface': os.getenv('WG_INTERFACE', 'wg0'),
+        'config_path': os.getenv('WG_CONFIG', '/etc/wireguard/wg0.conf'),
+        'config_exists': False,
+        'status': 'unavailable',
     }
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            response = await client.get(
+                f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard"
+            )
+            response.raise_for_status()
+            result.update(response.json())
+            result['enabled'] = wireguard_enabled()
+    except Exception as e:
+        result['detail'] = str(e)
+    return result
 
 
 @app.get('/api/settings/connections')
@@ -122,7 +136,13 @@ async def test_provider_connection(provider:str):
 @app.get('/api/services')
 async def services():
     c=db(); result={k:worker_state(c,k) for k in ('worker','scheduler')}; c.close()
-    result['wireguard']={'enabled':wireguard_enabled(),'interface':'wg0','status':'unknown'}
+    result['wireguard']={
+        'enabled': wireguard_enabled(),
+        'interface': os.getenv('WG_INTERFACE','wg0'),
+        'config_path': os.getenv('WG_CONFIG','/etc/wireguard/wg0.conf'),
+        'config_exists': False,
+        'status': 'unknown',
+    }
     try:
         async with httpx.AsyncClient(timeout=3) as client:
             response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
@@ -131,6 +151,8 @@ async def services():
             result['wireguard']={
                 'enabled':bool(wg.get('enabled')),
                 'interface':wg.get('interface','wg0'),
+                'config_path':wg.get('config_path',os.getenv('WG_CONFIG','/etc/wireguard/wg0.conf')),
+                'config_exists':bool(wg.get('config_exists')),
                 'status':'connected' if wg.get('vpn_route') else ('routing' if wg.get('enabled') else 'disconnected'),
                 'vpn_route':bool(wg.get('vpn_route')),
                 'route_active':bool(wg.get('route_active')),
