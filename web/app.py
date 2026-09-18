@@ -56,10 +56,39 @@ def spotify_logout():
 
 @app.get('/api/search/spotify')
 async def search_spotify(q:str=''):
-    if not q.strip(): return {'items':[]}
-    try: result=await public_search(q)
-    except Exception as e: return {'items':[],'error':str(e)}
-    return {'items':[{'id':t['id'],'title':t['name'],'artists':', '.join(a['name'] for a in t['artists']),'album':t['album']['name'],'url':t['external_urls']['spotify'],'image':t['album']['images'][-1]['url'] if t['album']['images'] else ''} for t in result.get('tracks',{}).get('items',[])]}
+    if not q.strip(): return {'items':[],'available':True}
+
+    try:
+        result=await public_search(q)
+    except PermissionError as e:
+        return {
+            'items':[],
+            'available':False,
+            'error_code':'SPOTIFY_403',
+            'error':str(e),
+        }
+    except Exception as e:
+        return {
+            'items':[],
+            'available':False,
+            'error_code':'SPOTIFY_ERROR',
+            'error':str(e),
+        }
+
+    return {
+        'items':[
+            {
+                'id':t['id'],
+                'title':t['name'],
+                'artists':', '.join(a['name'] for a in t['artists']),
+                'album':t['album']['name'],
+                'url':t['external_urls']['spotify'],
+                'image':t['album']['images'][-1]['url'] if t['album']['images'] else '',
+            }
+            for t in result.get('tracks',{}).get('items',[])
+        ],
+        'available':True,
+    }
 
 @app.get('/api/search/youtube')
 async def search_youtube(q:str='',page:int=1,limit:int=10):
