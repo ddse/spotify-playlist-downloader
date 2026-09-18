@@ -126,6 +126,21 @@ def status():
         handshake_recent, peers = _handshake_status() if up else (False, [])
         public_ip = _public_ip() if up and route_active else ""
         vpn_route = up and route_active and handshake_recent and bool(public_ip)
+        if not up:
+            status = "disconnected"
+            status_detail = "WireGuard interface is down"
+        elif not route_active:
+            status = "routing"
+            status_detail = "Interface is up but no WireGuard default route is active"
+        elif not handshake_recent:
+            status = "routing"
+            status_detail = "Route is active but no recent peer handshake was detected"
+        elif not public_ip:
+            status = "routing"
+            status_detail = "Tunnel handshake is recent but public IP could not be detected"
+        else:
+            status = "connected"
+            status_detail = "WireGuard tunnel is connected and routed"
         transfer = {"receive_bytes": 0, "send_bytes": 0}
         try:
             raw = subprocess.run(
@@ -147,6 +162,8 @@ def status():
             "route_active": route_active,
             "handshake_recent": handshake_recent,
             "vpn_route": vpn_route,
+            "status": status,
+            "status_detail": status_detail,
             "public_ip": public_ip,
             "peer_count": len(peers),
             "peers": peers,
