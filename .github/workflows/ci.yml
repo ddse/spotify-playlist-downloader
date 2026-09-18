@@ -1,27 +1,104 @@
-name: CI
+name: CI/CD
 
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
+  packages: write
+
+concurrency:
+  group: ci-cd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
+    name: Full validation
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: Python syntax
         run: python -m compileall -q database.py web worker tests
-      - name: Automation tests
+
+      - name: Python automation tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+
       - name: Frontend build
         working-directory: web
         run: |
           npm install
           npm run build
+
       - name: Docker Compose validation
         run: docker compose config
+
+      - name: Build all Docker services
+        run: docker compose build --pull
+
+      - name: Integration smoke test
+        run: |
+          docker compose up -d --wait
+          curl --fail --retry 10 --retry-delay 2 http://127.0.0.1:8088/health
+          docker compose ps
+          docker compose down -v
+
+  publish:
+    name: Publish Docker images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image tags
+        id: meta
+        run: |
+          echo "web=ghcr.io/${GITHUB_REPOSITORY,,}-web:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "worker=ghcr.io/${GITHUB_REPOSITORY,,}-worker:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "web_latest=ghcr.io/${GITHUB_REPOSITORY,,}-web:latest" >> "$GITHUB_OUTPUT"
+          echo "worker_latest=ghcr.io/${GITHUB_REPOSITORY,,}-worker:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.web }}
+            ${{ steps.meta.outputs.web_latest }}
+
+      - name: Build and push worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: worker/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.worker }}
+            ${{ steps.meta.outputs.worker_latest }}
