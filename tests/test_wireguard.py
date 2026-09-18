@@ -116,6 +116,25 @@ class WireGuardManagerTests(unittest.TestCase):
         self.assertEqual(result["receive_bytes"], 1024)
         self.assertEqual(result["send_bytes"], 2048)
 
+    def test_route_status_detects_wg_quick_policy_route(self):
+        class Result:
+            def __init__(self, stdout):
+                self.stdout = stdout
+
+        def run(*args, **kwargs):
+            command = list(args)
+            if command[:5] == ["ip", "-4", "route", "show", "table"]:
+                return Result("default dev wg0 table 51820\n")
+            if command[:4] == ["ip", "-4", "rule"]:
+                return Result("32764: from all lookup main suppress_prefixlength 0\n")
+            raise AssertionError(f"unexpected command: {command}")
+
+        with patch.object(self.wireguard.subprocess, "run", side_effect=run):
+            active, routes = self.wireguard._route_status()
+
+        self.assertTrue(active)
+        self.assertEqual(routes, ["default dev wg0 table 51820"])
+
     def test_status_is_not_vpn_active_without_recent_handshake(self):
         with patch.object(self.wireguard, "is_up", return_value=True),              patch.object(
                  self.wireguard,
