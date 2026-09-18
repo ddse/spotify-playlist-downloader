@@ -79,7 +79,8 @@ def init_db(c=None):
         error TEXT,
         last_tested_at TEXT,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')\n    c.execute('''CREATE TABLE IF NOT EXISTS playlists(
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS playlists(
         spotify_id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         url TEXT NOT NULL,
