@@ -69,16 +69,29 @@ async def search_spotify(q:str=''):
     return {'items':[{'id':t['id'],'title':t['name'],'artists':', '.join(a['name'] for a in t['artists']),'album':t['album']['name'],'url':t['external_urls']['spotify'],'image':t['album']['images'][-1]['url'] if t['album']['images'] else ''} for t in result.get('tracks',{}).get('items',[])]}
 
 @app.get('/api/search/youtube')
-def search_youtube(q:str=''):
-    if not q.strip(): return {'items':[]}
-    try:return {'items':youtube_search(q)}
-    except Exception as e:return {'items':[],'error':str(e)}
+def search_youtube(q:str='',page:int=1,limit:int=10):
+    if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
+    try:return youtube_search(q,page=page,limit=limit)
+    except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.post('/api/download')
-def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),download_type:str=Form('audio')):
+def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto')):
     download_type = download_type if download_type in ('audio', 'video') else 'audio'
-    key=('yt:'+youtube_id if youtube_id else 'url:'+secrets.token_hex(12))+':'+download_type
-    c=db(); c.execute('''INSERT INTO tracks(spotify_id,title,artists,album,spotify_url,status,progress,error,source_type,source_url) VALUES(?,?,?,?,?,'queued',0,NULL,?,?) ON CONFLICT(spotify_id) DO UPDATE SET title=excluded.title,artists=excluded.artists,album=excluded.album,source_type=excluded.source_type,source_url=excluded.source_url,status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,error=NULL,updated_at=CURRENT_TIMESTAMP''',(key,title,artists,album,source_url,download_type,source_url)); c.commit(); c.close(); return RedirectResponse('/',303)
+    audio_formats = {'m4a','mp3','opus','wav','flac'}
+    video_formats = {'any','mp4','ios'}
+    audio_quality = {'0','128','192','256','320','best'}
+    video_quality = {'best','2160','1440','1080','720','480','360'}
+    codecs = {'auto','h264','h265','av1','vp9'}
+    if download_type == 'audio':
+        download_format = download_format if download_format in audio_formats else 'mp3'
+        download_quality = download_quality if download_quality in audio_quality else '320'
+        video_codec = 'auto'
+    else:
+        download_format = download_format if download_format in video_formats else 'any'
+        download_quality = download_quality if download_quality in video_quality else 'best'
+        video_codec = video_codec if video_codec in codecs else 'auto'
+    key=('yt:'+youtube_id if youtube_id else 'url:'+secrets.token_hex(12))+':'+download_type+':'+download_format+':'+download_quality+':'+video_codec
+    c=db(); c.execute('''INSERT INTO tracks(spotify_id,title,artists,album,spotify_url,status,progress,error,source_type,source_url,download_type,download_format,download_quality,video_codec) VALUES(?,?,?,?,?,'queued',0,NULL,?,?, ?,?,?,?) ON CONFLICT(spotify_id) DO UPDATE SET title=excluded.title,artists=excluded.artists,album=excluded.album,source_type=excluded.source_type,source_url=excluded.source_url,download_type=excluded.download_type,download_format=excluded.download_format,download_quality=excluded.download_quality,video_codec=excluded.video_codec,status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,error=NULL,updated_at=CURRENT_TIMESTAMP''',(key,title,artists,album,source_url,download_type,source_url,download_type,download_format,download_quality,video_codec)); c.commit(); c.close(); return RedirectResponse('/',303)
 
 @app.post('/api/retry/{track_id}')
 def retry(track_id:str):
@@ -129,11 +142,11 @@ def playlists():
 
 @app.get('/api/jobs')
 def jobs():
-    c=db(); rows=c.execute("SELECT spotify_id,title,artists,album,status,progress,error,source_type,source_url,updated_at,created_at FROM tracks ORDER BY CASE status WHEN 'downloading' THEN 0 WHEN 'queued' THEN 1 WHEN 'pending_source' THEN 2 WHEN 'failed' THEN 3 ELSE 4 END,updated_at DESC LIMIT 100").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
+    c=db(); rows=c.execute("SELECT spotify_id,title,artists,album,status,progress,error,source_type,source_url,download_type,download_format,download_quality,video_codec,updated_at,created_at FROM tracks ORDER BY CASE status WHEN 'downloading' THEN 0 WHEN 'queued' THEN 1 WHEN 'pending_source' THEN 2 WHEN 'failed' THEN 3 ELSE 4 END,updated_at DESC LIMIT 100").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
 
 @app.get('/api/history')
 def history():
-    c=db(); rows=c.execute("SELECT spotify_id,title,artists,album,status,progress,error,source_type,source_url,updated_at,created_at FROM tracks WHERE status IN ('completed','failed') ORDER BY updated_at DESC LIMIT 200").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
+    c=db(); rows=c.execute("SELECT spotify_id,title,artists,album,status,progress,error,source_type,source_url,download_type,download_format,download_quality,video_codec,updated_at,created_at FROM tracks WHERE status IN ('completed','failed') ORDER BY updated_at DESC LIMIT 200").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
 
 @app.get('/metube')
 def metube_redirect(): return RedirectResponse(METUBE_PUBLIC_URL)
