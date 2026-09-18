@@ -80,6 +80,10 @@ def init_db(c=None):
         enabled INTEGER NOT NULL DEFAULT 1,
         last_sync TEXT
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS app_settings(
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )''')
     c.execute('''CREATE TABLE IF NOT EXISTS service_heartbeat(
         service TEXT PRIMARY KEY,
         heartbeat REAL NOT NULL,
