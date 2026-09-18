@@ -26,6 +26,7 @@ TRACK_BASE_COLUMNS = {
     'total_bytes': 'INTEGER DEFAULT 0',
     'download_speed': "TEXT DEFAULT ''",
     'eta': "TEXT DEFAULT ''",
+    'wireguard': 'INTEGER DEFAULT 0',
 }
 
 
@@ -69,23 +70,19 @@ def init_db(c=None):
         downloaded_bytes INTEGER DEFAULT 0,
         total_bytes INTEGER DEFAULT 0,
         download_speed TEXT DEFAULT '',
-        eta TEXT DEFAULT ''
+        eta TEXT DEFAULT '',
+        wireguard INTEGER DEFAULT 0
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS provider_connections(
-        provider TEXT PRIMARY KEY,
-        enabled INTEGER NOT NULL DEFAULT 1,
-        config_json TEXT NOT NULL DEFAULT '{}',
-        status TEXT DEFAULT 'not_configured',
-        error TEXT,
-        last_tested_at TEXT,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS playlists(
+    c.execute('''CREATE TABLE IF NOT EXISTS provider_connections(\n        provider TEXT PRIMARY KEY,\n        enabled INTEGER NOT NULL DEFAULT 1,\n        config_json TEXT NOT NULL DEFAULT '{}',\n        status TEXT DEFAULT 'not_configured',\n        error TEXT,\n        last_tested_at TEXT,\n        updated_at TEXT DEFAULT CURRENT_TIMESTAMP\n    )''')\n    c.execute('''CREATE TABLE IF NOT EXISTS playlists(
         spotify_id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         url TEXT NOT NULL,
         enabled INTEGER NOT NULL DEFAULT 1,
         last_sync TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS app_settings(
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS service_heartbeat(
         service TEXT PRIMARY KEY,
