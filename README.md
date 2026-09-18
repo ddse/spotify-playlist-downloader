@@ -27,7 +27,7 @@ Spotify Search / Playlist metadata
           Jellyfin
 ```
 
-MeTube remains available as a separate browser-facing downloader. It is not part of the Spotify download path.
+The custom application owns the web UI, YouTube search, download queue, worker, and playlist scheduler. MeTube is no longer a runtime dependency; its UI/logic is used only as a reference for features and interaction patterns.
 
 ## Features
 
@@ -42,7 +42,7 @@ MeTube remains available as a separate browser-facing downloader. It is not part
 - Download history
 - Playlist scheduler
 - Worker and scheduler heartbeats
-- Healthchecks for all four containers
+- Healthchecks for the three application containers
 - No Docker socket access
 
 ## Spotify boundary
@@ -62,26 +62,21 @@ Spotify Development Mode currently requires the app owner/developer account to h
 
 Playlist synchronization creates `pending_source` metadata records. It deliberately does **not** download Spotify tracks automatically.
 
-## MeTube
-
-MeTube is exposed on port 8081 for direct/manual downloads. The current upstream image includes its own HTTP healthcheck and is used independently from the v3 queue. `METUBE_PUBLIC_URL` controls the browser-facing URL.
-
 ## OMV setup
 
 1. Create a Music shared folder in OMV.
 2. Copy `.env.example` to `.env`.
 3. Set `MUSIC_DIR` to the host path of the shared folder.
-4. Set `METUBE_PUBLIC_URL` to the OMV LAN address, for example `http://192.168.10.20:8081`.
-5. Set Spotify credentials if Spotify search/private playlists are wanted.
-6. Set `SPOTIFY_REDIRECT_URI` to the exact HTTPS redirect URI registered in Spotify Developer Dashboard.
-7. Generate a long random `SYNC_TOKEN` and keep it only in `.env`.
-8. Start:
+4. Set Spotify credentials if Spotify search/private playlists are wanted.
+5. Set `SPOTIFY_REDIRECT_URI` to the exact HTTPS redirect URI registered in Spotify Developer Dashboard.
+6. Generate a long random `SYNC_TOKEN` and keep it only in `.env`.
+7. Start:
 
 ```bash
 docker compose up -d --build
 ```
 
-Open `http://OMV-IP:8088` for the custom UI and `http://OMV-IP:8081` for MeTube.
+Open `http://OMV-IP:8088` for the custom UI.
 
 ## Healthchecks
 
@@ -90,7 +85,7 @@ docker compose ps
 docker inspect --format='{{.Name}} {{.State.Health.Status}}' $(docker compose ps -q)
 ```
 
-The web container checks `/health`; worker and scheduler check SQLite heartbeats. MeTube uses the upstream image healthcheck.
+The web container checks `/health`; worker and scheduler check SQLite heartbeats.
 
 ## Security
 
