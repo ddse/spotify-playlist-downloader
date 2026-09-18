@@ -48,6 +48,14 @@ def init(c):
         c.execute("ALTER TABLE tracks ADD COLUMN download_quality TEXT DEFAULT 'best'")
     if 'video_codec' not in cols:
         c.execute("ALTER TABLE tracks ADD COLUMN video_codec TEXT DEFAULT 'auto'")
+    if 'download_folder' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN download_folder TEXT DEFAULT ''")
+    if 'thumbnail' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN thumbnail INTEGER DEFAULT 1")
+    if 'subtitle' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN subtitle INTEGER DEFAULT 0")
+    if 'subtitle_lang' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN subtitle_lang TEXT DEFAULT 'ja,en'")
+    if 'subtitle_mode' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN subtitle_mode TEXT DEFAULT 'prefer_manual'")
+    if 'split_chapters' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN split_chapters INTEGER DEFAULT 0")
+    if 'auto_start' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN auto_start INTEGER DEFAULT 1")
+    if 'priority' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN priority INTEGER DEFAULT 0")
 
     c.execute("""
         UPDATE tracks
@@ -76,7 +84,12 @@ def download(row, c, track_id):
     artist = (row['artists'] or 'Unknown Artist').replace('/', '_')
     album = (row['album'] or 'YouTube').replace('/', '_')
     title = (row['title'] or 'Unknown Title').replace('/', '_')
-    folder = Path(MUSIC_DIR) / artist / album
+    custom_folder = (row['download_folder'] or '').strip()
+    if custom_folder:
+        safe = Path(custom_folder)
+        folder = Path(MUSIC_DIR) / safe
+    else:
+        folder = Path(MUSIC_DIR) / artist / album
     folder.mkdir(parents=True, exist_ok=True)
     output = str(folder / f'{title}.%(ext)s')
 
@@ -114,6 +127,11 @@ def download(row, c, track_id):
             heartbeat(c, 'postprocessing:' + track_id)
 
     download_type = row['download_type'] or row['source_type'] or 'audio'
+    thumbnail = bool(row['thumbnail'])
+    subtitle = bool(row['subtitle'])
+    subtitle_lang = row['subtitle_lang'] or 'ja,en'
+    subtitle_mode = row['subtitle_mode'] or 'prefer_manual'
+    split_chapters = bool(row['split_chapters'])
     download_format = row['download_format'] or ('mp3' if download_type == 'audio' else 'any')
     download_quality = row['download_quality'] or 'best'
     video_codec = row['video_codec'] or 'auto'
@@ -140,6 +158,11 @@ def download(row, c, track_id):
         'progress_hooks': [progress_hook],
         'overwrites': True,
         'embedmetadata': True,
+        'writethumbnail': thumbnail,
+        'writesubtitles': subtitle,
+        'writeautomaticsub': subtitle and subtitle_mode in {'auto_only','prefer_auto'},
+        'subtitleslangs': subtitle_lang.split(','),
+        'embedchapters': not split_chapters,
     }
 
     if download_type == 'audio':
@@ -153,8 +176,7 @@ def download(row, c, track_id):
             'preferredcodec': audio_format,
             'preferredquality': 0 if audio_quality == 'best' else audio_quality,
         }]
-        if audio_format != 'wav':
-            opts['writethumbnail'] = True
+        if audio_format != 'wav' and thumbnail:
             opts['postprocessors'] += [
                 {'key': 'FFmpegThumbnailsConvertor', 'format': 'jpg', 'when': 'before_dl'},
                 {'key': 'FFmpegMetadata'},
