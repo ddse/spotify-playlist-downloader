@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir --target /opt/python-packages "yt-dlp[default]"
 
 FROM python:3.13-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates ffmpeg wireguard-tools iproute2 procps kmod \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg wireguard-tools iproute2 procps kmod iptables \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /root/.deno/bin/deno /usr/local/bin/deno
 COPY --from=builder /opt/python-packages /usr/local/lib/python3.13/site-packages
