@@ -15,11 +15,14 @@ def _run(*args):
 
 
 def is_up():
-    return bool(subprocess.run(
-        ["ip", "link", "show", "dev", INTERFACE],
+    # Use the WireGuard userspace tool instead of relying on the ip(8)
+    # command being present in the minimal Python image.
+    result = subprocess.run(
+        ["wg", "show", INTERFACE],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-    ).returncode == 0)
+    )
+    return result.returncode == 0
 
 
 def set_enabled(enabled: bool):
