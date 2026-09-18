@@ -97,3 +97,32 @@ The web container checks `/health`; worker and scheduler check SQLite heartbeats
 ## Legal
 
 Only download content you are legally entitled to access or store. The project does not bypass DRM or access controls.
+
+
+## Optional WireGuard routing
+
+The application can run two download workers:
+
+- **Normal worker**: direct Internet connection.
+- **WireGuard worker**: YouTube search/download traffic exits through the WireGuard tunnel.
+
+Spotify API traffic remains on the normal web container network.
+
+The UI Settings dialog contains **Use WireGuard for YouTube**. When enabled, new YouTube searches and newly queued downloads use the WireGuard worker. When disabled, they use the normal worker. Each queued track stores its route, so changing the setting does not move an already queued job between workers.
+
+### WireGuard setup
+
+1. Copy `wireguard/wg0.conf.example` to `wireguard/wg0.conf`.
+2. Put the WireGuard **client** configuration in `wg0.conf`.
+3. For a full-tunnel setup, keep `AllowedIPs = 0.0.0.0/0`.
+4. Make sure the WireGuard server (for example, an ASUS router) forwards/NATs the client subnet to the Internet.
+5. Start the stack:
+
+```bash
+docker compose up -d --build
+docker compose ps
+```
+
+The real `wireguard/wg0.conf` is ignored by Git.
+
+The WireGuard worker shares the WireGuard container's network namespace. The web container reaches that worker through `http://wireguard:8090`; the normal worker remains at `http://worker-normal:8090`.
