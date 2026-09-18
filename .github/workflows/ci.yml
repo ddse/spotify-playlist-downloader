@@ -1,7 +1,8 @@
 name: CI
 
 # Feature branch conflict resolution validation
-# provider schema syntax fixed/CD
+# provider schema syntax fixed
+# dependencies installed before test suites/CD
 
 on:
   pull_request:
