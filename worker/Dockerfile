@@ -15,5 +15,5 @@ COPY --from=builder /root/.deno/bin/deno /usr/local/bin/deno
 COPY --from=builder /opt/python-packages /usr/local/lib/python3.13/site-packages
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
-COPY worker.py scheduler.py .
+COPY worker.py scheduler.py search.py .
 CMD ["python", "worker.py"]
