@@ -49,12 +49,35 @@ async def api(path,params=None):
 
 async def public_search(q):
     token=await access_token()
-    if token:return await api('/search',{'q':q,'type':'track','limit':10})
-    if not CLIENT_ID or not CLIENT_SECRET:return {'tracks':{'items':[]}}
+    if token:
+        return await api('/search',{'q':q,'type':'track','limit':10})
+
+    if not CLIENT_ID or not CLIENT_SECRET:
+        return {'tracks':{'items':[]}}
+
     raw=base64.b64encode(f'{CLIENT_ID}:{CLIENT_SECRET}'.encode()).decode()
     async with httpx.AsyncClient(timeout=20) as x:
-        t=await x.post('https://accounts.spotify.com/api/token',data={'grant_type':'client_credentials'},headers={'Authorization':'Basic '+raw}); t.raise_for_status(); at=t.json()['access_token']
-        r=await x.get('https://api.spotify.com/v1/search',params={'q':q,'type':'track','limit':10},headers={'Authorization':'Bearer '+at}); r.raise_for_status(); return r.json()
+        t=await x.post(
+            'https://accounts.spotify.com/api/token',
+            data={'grant_type':'client_credentials'},
+            headers={'Authorization':'Basic '+raw},
+        )
+        if t.status_code >= 400:
+            if t.status_code == 403:
+                raise PermissionError('Spotify Web API access requires an active Premium subscription for the Development Mode app owner')
+            t.raise_for_status()
+        at=t.json()['access_token']
+
+        r=await x.get(
+            'https://api.spotify.com/v1/search',
+            params={'q':q,'type':'track','limit':10},
+            headers={'Authorization':'Bearer '+at},
+        )
+        if r.status_code >= 400:
+            if r.status_code == 403:
+                raise PermissionError('Spotify Web API returned 403: the app owner may need an active Premium subscription or the user may not be allowed to use this Development Mode app')
+            r.raise_for_status()
+        return r.json()
 
 async def playlist_items(pid):
     out=[]; offset=0
