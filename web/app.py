@@ -124,23 +124,23 @@ async def search_spotify(q:str=''):
 @app.get('/api/search/youtube')
 async def search_youtube(q:str='',page:int=1,limit:int=10):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit)
+    try:return await youtube_search(q,page=page,limit=limit,wireguard=wireguard_enabled())
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.get('/api/search/zingmp3')
 async def search_zingmp3(q:str='',page:int=1,limit:int=10):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit,source='zingmp3')
+    try:return await youtube_search(q,page=page,limit=limit,source='zingmp3',wireguard=wireguard_enabled())
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.get('/api/search/nhaccuatui')
 async def search_nhaccuatui(q:str='',page:int=1,limit:int=10):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit,source='nhaccuatui')
+    try:return await youtube_search(q,page=page,limit=limit,source='nhaccuatui',wireguard=wireguard_enabled())
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.post('/api/download')
-def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),source_mode:str=Form('single'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1')):
+def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),source_mode:str=Form('single'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1'),wireguard:str=Form('0')):
     download_type = download_type if download_type in ('audio', 'video', 'captions', 'thumbnail') else 'audio'
     source_mode = source_mode if source_mode in {'single','playlist','channel'} else 'single'
     audio_formats = {'m4a','mp3','opus','wav','flac'}
@@ -172,6 +172,7 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
     subs = 1 if str(subtitle).lower() in {'1','true','on','yes'} else 0
     chapters = 1 if str(split_chapters).lower() in {'1','true','on','yes'} else 0
     start = 1 if str(auto_start).lower() in {'1','true','on','yes'} else 0
+    use_wireguard = 1 if str(wireguard).lower() in {'1','true','on','yes'} else int(wireguard_enabled())
     key=('yt:'+youtube_id if youtube_id else 'url:'+secrets.token_hex(12))+':'+download_type+':'+download_format+':'+download_quality+':'+video_codec+':'+folder+':'+str(item_limit)
     c=db()
     # Use named parameters here so adding/removing a column cannot silently
@@ -197,17 +198,18 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
         'playlist_item_limit': item_limit,
         'split_chapters': chapters,
         'auto_start': start,
+        'wireguard': use_wireguard,
     }
     c.execute('''INSERT INTO tracks(
         spotify_id,title,artists,album,spotify_url,status,progress,error,
         source_type,source_url,download_type,download_format,download_quality,
         video_codec,download_folder,source_mode,thumbnail,subtitle,
-        subtitle_lang,subtitle_mode,playlist_item_limit,split_chapters,auto_start,priority
+        subtitle_lang,subtitle_mode,playlist_item_limit,split_chapters,auto_start,wireguard,priority
     ) VALUES(
         :spotify_id,:title,:artists,:album,:spotify_url,'queued',0,NULL,
         :source_type,:source_url,:download_type,:download_format,:download_quality,
         :video_codec,:download_folder,:source_mode,:thumbnail,:subtitle,
-        :subtitle_lang,:subtitle_mode,:playlist_item_limit,:split_chapters,:auto_start,0
+        :subtitle_lang,:subtitle_mode,:playlist_item_limit,:split_chapters,:auto_start,:wireguard,0
     )
     ON CONFLICT(spotify_id) DO UPDATE SET
         title=excluded.title, artists=excluded.artists, album=excluded.album,
@@ -218,7 +220,7 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
         thumbnail=excluded.thumbnail, subtitle=excluded.subtitle,
         subtitle_lang=excluded.subtitle_lang, subtitle_mode=excluded.subtitle_mode,
         playlist_item_limit=excluded.playlist_item_limit,
-        split_chapters=excluded.split_chapters, auto_start=excluded.auto_start,
+        split_chapters=excluded.split_chapters, auto_start=excluded.auto_start, wireguard=excluded.wireguard,
         status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,
         progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,
         error=NULL, updated_at=CURRENT_TIMESTAMP''', params)
