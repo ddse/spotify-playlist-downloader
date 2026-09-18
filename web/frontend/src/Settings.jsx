@@ -26,6 +26,7 @@ export default function Settings({onClose}) {
   const [wireguard,setWireguard]=useState(null);
   const [wireguardFiles,setWireguardFiles]=useState([]);
   const [findingWireguard,setFindingWireguard]=useState(false);
+  const [togglingWireguard,setTogglingWireguard]=useState(false);
   useEffect(()=>{
     api('/api/settings/connections').then(d=>setItems(d.items||{})).catch(e=>setMessage(e.message));
     api('/api/settings/wireguard').then(setWireguard).catch(e=>setWireguard({status:'unavailable',detail:e.message}));
@@ -36,13 +37,14 @@ export default function Settings({onClose}) {
   const set=(k,v)=>setItems(x=>({...x,[selected]:{...item,config:{...(x[selected]?.config||{}),[k]:v}}}));
   const save=async()=>{setSaving(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:item.enabled,config})});setItems(x=>({...x,[selected]:d}));setMessage('Saved. No restart required.')}catch(e){setMessage(e.message)}finally{setSaving(false)}};
   const findWireguard=async()=>{setFindingWireguard(true);setMessage('');try{const d=await api('/api/settings/wireguard/files');setWireguardFiles(d.files||[]);if(!(d.files||[]).length)setMessage('No WireGuard .conf files found in the mounted directory');}catch(e){setMessage(e.message)}finally{setFindingWireguard(false)}};
+  const toggleWireguard=async(enabled)=>{setTogglingWireguard(true);setMessage('');try{const fd=new FormData();fd.append('enabled',enabled?'1':'0');const d=await api('/api/settings/wireguard',{method:'POST',body:fd});setWireguard(d);localStorage.setItem('music-wireguard',enabled?'1':'0');window.dispatchEvent(new Event('wireguard-setting'));setMessage(enabled?'WireGuard enabled':'WireGuard disabled')}catch(e){setMessage(e.message)}finally{setTogglingWireguard(false)}};
   const test=async()=>{setTesting(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected+'/test',{method:'POST'});setMessage(d.ok?'Connection test successful':(d.error||'Connection test failed'));setItems(x=>({...x,[selected]:{...x[selected],status:d.status,error:d.error||''}}));}catch(e){setMessage(e.message)}finally{setTesting(false)}};
   return <div className="glass mt-4 rounded-2xl p-5">
     <div className="flex items-center justify-between border-b border-white/10 pb-4"><div><h2 className="text-lg font-semibold">Provider Connections</h2><p className="text-xs text-zinc-500">Settings are stored in the application database and applied at runtime.</p></div><button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-2 text-sm">Close</button></div>
     <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h3 className="font-medium">WireGuard</h3><p className="text-xs text-zinc-500">Live routing status and mounted configuration.</p></div>
-        <span className="rounded-lg border border-white/10 px-3 py-1.5 text-xs">{wireguard?.status||'loading'}</span>
+        <div className="flex items-center gap-2"><span className="rounded-lg border border-white/10 px-3 py-1.5 text-xs">{wireguard?.status||'loading'}</span><button onClick={()=>toggleWireguard(!wireguard?.enabled)} disabled={togglingWireguard||wireguard===null||!wireguard?.config_exists} className={'rounded-lg px-3 py-1.5 text-xs text-white '+(wireguard?.enabled?'bg-red-600 hover:bg-red-500':'bg-emerald-600 hover:bg-emerald-500')}>{togglingWireguard?'Applying...':wireguard?.enabled?'Disable':'Enable'}</button></div>
       </div>
       <div className="mt-3 grid gap-2 text-xs text-zinc-400 md:grid-cols-3">
         <div>Interface: <span className="text-zinc-200">{wireguard?.interface||'wg0'}</span></div>
@@ -58,7 +60,7 @@ export default function Settings({onClose}) {
       </div>
       {wireguardFiles.length>0&&<div className="mt-2 space-y-1">{wireguardFiles.map(x=><div key={x.path} className="rounded-lg bg-black/20 px-3 py-2 font-mono text-xs text-zinc-300">{x.path}</div>)}</div>}
       {!wireguard?.config_exists&&<div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-200">WireGuard config is not mounted. Create <code>wireguard/wg0.conf</code> from the example and restart the worker.</div>}
-      {wireguard?.detail&&<div className="mt-2 text-xs text-red-300">{wireguard.detail}</div>}
+      {wireguard?.status_detail&&<div className="mt-2 text-xs text-amber-300">{wireguard.status_detail}</div>}{wireguard?.error&&<div className="mt-2 text-xs text-red-300">{wireguard.error}</div>}{wireguard?.detail&&<div className="mt-2 text-xs text-red-300">{wireguard.detail}</div>}
     </div>
     <div className="mt-5 grid gap-5 md:grid-cols-[220px_1fr]">
       <div className="space-y-1">{PROVIDERS.map(x=><button key={x.id} onClick={()=>{setSelected(x.id);setMessage('')}} className={'w-full rounded-lg px-3 py-2 text-left text-sm '+(selected===x.id?'bg-violet-600/20 text-violet-200':'text-zinc-400 hover:bg-white/5')}>{x.name}<span className="float-right text-xs">{items[x.id]?.configured?'●':'○'}</span></button>)}</div>
