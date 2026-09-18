@@ -55,7 +55,18 @@ async def services():
             response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
             response.raise_for_status()
             wg=response.json()
-            result['wireguard']={'enabled':bool(wg.get('enabled')),'interface':wg.get('interface','wg0'),'status':'connected' if wg.get('enabled') else 'disconnected'}
+            result['wireguard']={
+                'enabled':bool(wg.get('enabled')),
+                'interface':wg.get('interface','wg0'),
+                'status':'connected' if wg.get('vpn_route') else ('routing' if wg.get('enabled') else 'disconnected'),
+                'vpn_route':bool(wg.get('vpn_route')),
+                'route_active':bool(wg.get('route_active')),
+                'handshake_recent':bool(wg.get('handshake_recent')),
+                'public_ip':wg.get('public_ip',''),
+                'receive_bytes':int(wg.get('receive_bytes',0)),
+                'send_bytes':int(wg.get('send_bytes',0)),
+                'peer_count':int(wg.get('peer_count',0)),
+            }
     except Exception as e:
         result['wireguard']['status']='unavailable'
         result['wireguard']['detail']=str(e)
