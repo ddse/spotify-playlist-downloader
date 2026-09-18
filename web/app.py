@@ -338,7 +338,7 @@ def history():
     c=db(); rows=c.execute("SELECT * FROM tracks WHERE status IN ('completed','failed') ORDER BY updated_at DESC LIMIT 200").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
 
 @app.get('/api/files/{track_id}')
-def download_file(track_id:str):
+def download_file(track_id:str, download:bool=Query(False)):
     c=db(); row=c.execute('SELECT * FROM tracks WHERE spotify_id=? AND status=\'completed\'',(track_id,)).fetchone(); c.close()
     if not row: raise HTTPException(404,'completed file not found')
     music=Path(os.getenv('MUSIC_DIR','/music')).resolve()
@@ -355,10 +355,10 @@ def download_file(track_id:str):
     preferred += ['mp3','m4a','opus','flac','wav','mp4','webm','mkv','mov']
     for ext in dict.fromkeys(preferred):
         p=folder / f'{title}.{ext}'
-        if p.is_file(): return FileResponse(p, filename=p.name)
+        if p.is_file(): return FileResponse(p, filename=p.name, content_disposition_type='attachment' if download else 'inline')
     matches=sorted(folder.glob(f'{title}.*'), key=lambda p:p.stat().st_mtime, reverse=True)
     for p in matches:
         if p.is_file() and p.suffix.lower() not in {'.jpg','.jpeg','.png','.webp','.vtt','.srt','.ass','.lrc'}:
-            return FileResponse(p, filename=p.name)
+            return FileResponse(p, filename=p.name, content_disposition_type='attachment' if download else 'inline')
     raise HTTPException(404,'completed file not found')
 
