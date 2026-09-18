@@ -1,8 +1,8 @@
-import base64, hashlib, os, secrets, sqlite3, time
+import base64, hashlib, os, secrets, sqlite3, time, json
 from urllib.parse import urlencode
 import httpx
 
-DB_PATH=os.getenv('DB_PATH','/state/app.db'); CLIENT_ID=os.getenv('SPOTIFY_CLIENT_ID',''); CLIENT_SECRET=os.getenv('SPOTIFY_CLIENT_SECRET',''); REDIRECT_URI=os.getenv('SPOTIFY_REDIRECT_URI','http://localhost:8088/api/spotify/callback')
+DB_PATH=os.getenv('DB_PATH','/state/app.db')\nDEFAULT_CLIENT_ID=os.getenv('SPOTIFY_CLIENT_ID',''); DEFAULT_CLIENT_SECRET=os.getenv('SPOTIFY_CLIENT_SECRET',''); DEFAULT_REDIRECT_URI=os.getenv('SPOTIFY_REDIRECT_URI','http://localhost:8088/api/spotify/callback')\n\ndef spotify_config():\n    c=db(); row=c.execute("SELECT config_json FROM provider_connections WHERE provider='spotify'").fetchone(); c.close()\n    cfg=json.loads(row['config_json']) if row and row['config_json'] else {}\n    return cfg\n\ndef spotify_credentials():\n    cfg=spotify_config(); return (cfg.get('client_id') or DEFAULT_CLIENT_ID, cfg.get('client_secret') or DEFAULT_CLIENT_SECRET, cfg.get('redirect_uri') or DEFAULT_REDIRECT_URI)
 SCOPES='playlist-read-private playlist-read-collaborative user-read-private'
 
 def db():
@@ -15,12 +15,12 @@ def pkce():
 
 def authorize_url():
     verifier,challenge=pkce(); state=secrets.token_urlsafe(32); c=db(); c.execute('DELETE FROM oauth_state WHERE created_at<?',(int(time.time())-900,)); c.execute('INSERT INTO oauth_state VALUES(?,?,?)',(state,verifier,int(time.time()))); c.commit(); c.close()
-    q={'response_type':'code','client_id':CLIENT_ID,'scope':SCOPES,'redirect_uri':REDIRECT_URI,'state':state,'code_challenge_method':'S256','code_challenge':challenge}; return 'https://accounts.spotify.com/authorize?'+urlencode(q)
+    CLIENT_ID,_,REDIRECT_URI=spotify_credentials(); q={'response_type':'code','client_id':CLIENT_ID,'scope':SCOPES,'redirect_uri':REDIRECT_URI,'state':state,'code_challenge_method':'S256','code_challenge':challenge}; return 'https://accounts.spotify.com/authorize?'+urlencode(q)
 
 async def exchange(code,state):
     c=db(); row=c.execute('SELECT verifier FROM oauth_state WHERE state=?',(state,)).fetchone(); c.execute('DELETE FROM oauth_state WHERE state=?',(state,)); c.commit(); c.close()
     if not row: raise ValueError('Invalid or expired OAuth state')
-    data={'grant_type':'authorization_code','code':code,'redirect_uri':REDIRECT_URI,'client_id':CLIENT_ID,'code_verifier':row['verifier']}; headers={}
+    CLIENT_ID,CLIENT_SECRET,REDIRECT_URI=spotify_credentials(); data={'grant_type':'authorization_code','code':code,'redirect_uri':REDIRECT_URI,'client_id':CLIENT_ID,'code_verifier':row['verifier']}; headers={}
     if CLIENT_SECRET: headers['Authorization']='Basic '+base64.b64encode(f'{CLIENT_ID}:{CLIENT_SECRET}'.encode()).decode(); data.pop('client_id',None)
     async with httpx.AsyncClient(timeout=20) as x: r=await x.post('https://accounts.spotify.com/api/token',data=data,headers=headers); r.raise_for_status(); token=r.json()
     c=db(); c.execute('INSERT OR REPLACE INTO spotify_tokens(id,access_token,refresh_token,expires_at,scope) VALUES(1,?,?,?,?)',(token['access_token'],token.get('refresh_token'),int(time.time())+token['expires_in']-60,token.get('scope',''))); c.commit(); c.close()
@@ -30,7 +30,7 @@ async def access_token():
     if not row:return None
     if row['expires_at'] and row['expires_at']>int(time.time()):return row['access_token']
     if not row['refresh_token']:return None
-    data={'grant_type':'refresh_token','refresh_token':row['refresh_token'],'client_id':CLIENT_ID}; headers={}
+    CLIENT_ID,CLIENT_SECRET,_=spotify_credentials(); data={'grant_type':'refresh_token','refresh_token':row['refresh_token'],'client_id':CLIENT_ID}; headers={}
     if CLIENT_SECRET: headers['Authorization']='Basic '+base64.b64encode(f'{CLIENT_ID}:{CLIENT_SECRET}'.encode()).decode(); data.pop('client_id',None)
     async with httpx.AsyncClient(timeout=20) as x:
         r=await x.post('https://accounts.spotify.com/api/token',data=data,headers=headers)
@@ -52,7 +52,7 @@ async def public_search(q):
     if token:
         return await api('/search',{'q':q,'type':'track','limit':10})
 
-    if not CLIENT_ID or not CLIENT_SECRET:
+    CLIENT_ID,CLIENT_SECRET,_=spotify_credentials()\n    if not CLIENT_ID or not CLIENT_SECRET:
         return {'tracks':{'items':[]}}
 
     raw=base64.b64encode(f'{CLIENT_ID}:{CLIENT_SECRET}'.encode()).decode()
