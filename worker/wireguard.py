@@ -16,8 +16,6 @@ def _run(*args):
 
 
 def is_up():
-    # Use the WireGuard userspace tool instead of relying on the ip(8)
-    # command being present in the minimal Python image.
     result = subprocess.run(
         ["wg", "show", INTERFACE],
         stdout=subprocess.DEVNULL,

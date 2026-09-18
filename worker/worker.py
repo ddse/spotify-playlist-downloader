@@ -61,6 +61,27 @@ def init(c):
     from database import init_db
     init_db(c)
 
+def format_speed(value):
+    value = float(value or 0)
+    if value <= 0:
+        return ''
+    units = ('B/s', 'KB/s', 'MB/s', 'GB/s')
+    i = 0
+    while value >= 1024 and i < len(units) - 1:
+        value /= 1024
+        i += 1
+    return f'{value:.1f} {units[i]}'
+
+
+def format_eta(seconds):
+    if seconds is None or seconds < 0:
+        return ''
+    seconds = int(seconds)
+    if seconds < 60:
+        return f'{seconds}s'
+    return f'{seconds // 60}:{seconds % 60:02d}'
+
+
 def heartbeat(c, detail='idle'):
     c.execute(
         '''INSERT INTO service_heartbeat(service,heartbeat,detail)
@@ -126,9 +147,10 @@ def download(row, c, track_id):
 
     last_progress = -1
     last_heartbeat = 0.0
+    last_stats_update = 0.0
 
     def progress_hook(data):
-        nonlocal last_progress, last_heartbeat
+        nonlocal last_progress, last_heartbeat, last_stats_update
         now = time.time()
         status = data.get('status')
 
@@ -137,13 +159,16 @@ def download(row, c, track_id):
             downloaded = data.get('downloaded_bytes', 0)
             percent = int(downloaded * 100 / total) if total else 1
             percent = max(1, min(99, percent))
-            if percent != last_progress:
+            speed = data.get('speed') or 0
+            eta_seconds = data.get('eta')
+            if percent != last_progress or now - last_stats_update >= 1:
                 c.execute(
-                    'UPDATE tracks SET progress=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
-                    (percent, track_id),
+                    'UPDATE tracks SET progress=?,downloaded_bytes=?,total_bytes=?,download_speed=?,eta=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
+                    (percent, downloaded, int(total or 0), format_speed(speed), format_eta(eta_seconds), track_id),
                 )
                 c.commit()
                 last_progress = percent
+                last_stats_update = now
 
             if now - last_heartbeat >= 5:
                 heartbeat(c, 'downloading:' + track_id)
@@ -151,7 +176,7 @@ def download(row, c, track_id):
 
         elif status == 'finished':
             c.execute(
-                'UPDATE tracks SET progress=99,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
+                'UPDATE tracks SET progress=99,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
                 (track_id,),
             )
             c.commit()
@@ -287,13 +312,13 @@ while True:
                 lambda: download(row, c, track_id),
             )
             c.execute(
-                "UPDATE tracks SET status='completed',progress=100,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
+                "UPDATE tracks SET status='completed',progress=100,error=NULL,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
                 (track_id,),
             )
         except Exception as e:
             err = format_error(e, '\n'.join(log_lines) if 'log_lines' in locals() else '')
             c.execute(
-                "UPDATE tracks SET status='failed',progress=0,error=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
+                "UPDATE tracks SET status='failed',progress=0,error=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
                 (err, track_id),
             )
             heartbeat(c, 'failed:' + track_id)
