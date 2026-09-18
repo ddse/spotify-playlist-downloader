@@ -133,6 +133,25 @@ def import_youtube(source_url:str=Form(...),source_mode:str=Form('playlist'),dow
     title = source_url.rstrip('/').split('/')[-1].split('?')[0] or 'YouTube import'
     return download(source_url=source_url,title=title,artists='YouTube',album=source_mode,youtube_id='',source_mode=source_mode,download_type=download_type,download_format=download_format,download_quality=download_quality,video_codec='auto',download_folder=download_folder,thumbnail='1',subtitle='0',subtitle_lang='ja,en',subtitle_mode='prefer_manual',playlist_item_limit=playlist_item_limit,split_chapters='0',auto_start='1')
 
+@app.post('/api/queue/bulk')
+def queue_bulk(action:str=Form(...),ids:str=Form('')):
+    valid={'clear_selected','clear_completed','clear_failed','retry_failed','download_selected'}
+    if action not in valid: raise HTTPException(400,'invalid action')
+    selected=[x for x in ids.split(',') if x]
+    c=db()
+    if action == 'clear_selected' and selected:
+        c.executemany("DELETE FROM tracks WHERE spotify_id=?",( (x,) for x in selected ))
+    elif action == 'clear_completed':
+        c.execute("DELETE FROM tracks WHERE status='completed'")
+    elif action == 'clear_failed':
+        c.execute("DELETE FROM tracks WHERE status='failed'")
+    elif action == 'retry_failed':
+        c.execute("UPDATE tracks SET status='queued',progress=0,error=NULL,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE status='failed'")
+    elif action == 'download_selected' and selected:
+        c.executemany("UPDATE tracks SET status='queued',progress=0,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status='completed'",((x,) for x in selected))
+    c.commit(); c.close()
+    return {'ok':True}
+
 @app.post('/api/retry/{track_id}')
 def retry(track_id:str):
     c=db(); c.execute("UPDATE tracks SET status='queued',progress=0,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status='failed'",(track_id,)); c.commit(); c.close(); return {'ok':True}
