@@ -33,6 +33,9 @@ services:
       context: .
       dockerfile: worker/Dockerfile
     restart: unless-stopped
+    # Temporary test mode: wg-quick needs kernel networking/sysctl access.
+    # Reduce privileges after WireGuard routing is confirmed.
+    privileged: true
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
