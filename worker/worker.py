@@ -104,6 +104,7 @@ def download(row, c, track_id):
             c.commit()
             heartbeat(c, 'postprocessing:' + track_id)
 
+    download_type = row['source_type'] or 'audio'
     opts = {
         # Do not force bestaudio/best here. YouTube can expose different
         # format sets depending on the player client; yt-dlp's own default
@@ -122,6 +123,17 @@ def download(row, c, track_id):
         'embedmetadata': True,
         'overwrites': True,
     }
+
+    if download_type == 'audio':
+        opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': FMT,
+            'preferredquality': BITRATE,
+        }]
+    else:
+        opts['format'] = 'bestvideo+bestaudio/best'
+        opts['merge_output_format'] = 'mp4'
+
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         result = ydl.download([url])
