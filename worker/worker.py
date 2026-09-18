@@ -1,7 +1,8 @@
-import os, sqlite3, time
+import os, sqlite3, time, traceback
 from pathlib import Path
 
 import yt_dlp
+from yt_dlp.utils import DownloadError
 
 DB_PATH = os.getenv('DB_PATH', '/state/app.db')
 MUSIC_DIR = os.getenv('MUSIC_DIR', '/music')
@@ -105,6 +106,19 @@ def download(row, c, track_id):
             heartbeat(c, 'postprocessing:' + track_id)
 
     download_type = row['source_type'] or 'audio'
+    log_lines = []
+
+    class YTDLPLogger:
+        def debug(self, msg):
+            if msg.startswith('[debug] '):
+                log_lines.append(msg)
+        def info(self, msg):
+            log_lines.append(msg)
+        def warning(self, msg):
+            log_lines.append('[warning] ' + msg)
+        def error(self, msg):
+            log_lines.append('[error] ' + msg)
+
     opts = {
         # Do not force bestaudio/best here. YouTube can expose different
         # format sets depending on the player client; yt-dlp's own default
@@ -113,6 +127,8 @@ def download(row, c, track_id):
         'noplaylist': True,
         'quiet': False,
         'no_warnings': False,
+        'logger': YTDLPLogger(),
+        'verbose': True,
         'progress_hooks': [progress_hook],
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
@@ -142,13 +158,18 @@ def download(row, c, track_id):
         raise RuntimeError(f'yt-dlp exited with code {result}')
 
 
-def format_error(exc):
-    # Keep the full useful yt-dlp exception text in the DB so the UI can
-    # display it in <details> instead of losing it when the process exits.
-    text = str(exc).strip()
-    if not text:
-        text = repr(exc)
-    return text[-12000:]
+def format_error(exc, logger_text=''):
+    parts = []
+    if logger_text.strip():
+        parts.append(logger_text.strip())
+    if isinstance(exc, DownloadError):
+        parts.append('yt-dlp DownloadError: ' + str(exc))
+        if getattr(exc, 'exc_info', None):
+            parts.append(''.join(traceback.format_exception(*exc.exc_info)).strip())
+    else:
+        parts.append(type(exc).__name__ + ': ' + str(exc))
+        parts.append(traceback.format_exc().strip())
+    return '\n\n'.join(p for p in parts if p)[-20000:]
 
 
 while True:
@@ -182,7 +203,7 @@ while True:
                 (track_id,),
             )
         except Exception as e:
-            err = format_error(e)
+            err = format_error(e, '\n'.join(log_lines) if 'log_lines' in locals() else '')
             c.execute(
                 "UPDATE tracks SET status='failed',progress=0,error=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
                 (err, track_id),
