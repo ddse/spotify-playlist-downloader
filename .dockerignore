@@ -2,9 +2,9 @@
 .gitignore
 .env
 .env.*
-state/
-**/__pycache__/
-**/*.pyc
-**/node_modules/
-**/dist/
-**/.venv/
+state
+__pycache__
+*.pyc
+node_modules
+dist
+.venv
