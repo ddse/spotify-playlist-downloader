@@ -14,12 +14,9 @@ services:
       SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET}
       SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI}
       SYNC_TOKEN: ${SYNC_TOKEN}
-      WORKER_ENDPOINT: http://worker-normal:8090
-      WORKER_VPN_ENDPOINT: http://wireguard:8090
+      WORKER_ENDPOINT: http://worker:8090
     depends_on:
-      worker-normal:
-        condition: service_started
-      worker-vpn:
+      worker:
         condition: service_started
     volumes:
       - ${MUSIC_DIR}:/music
@@ -31,11 +28,15 @@ services:
       retries: 5
       start_period: 20s
 
-  worker-normal:
+  worker:
     build:
       context: .
       dockerfile: worker/Dockerfile
     restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
     environment:
       TZ: ${TZ:-Asia/Tokyo}
       DB_PATH: /state/app.db
@@ -43,10 +44,11 @@ services:
       AUDIO_FORMAT: ${AUDIO_FORMAT:-mp3}
       AUDIO_BITRATE: ${AUDIO_BITRATE:-320k}
       WORKER_SERVICE_NAME: worker
-      ROUTE_WIREGUARD: "0"
+      WG_CONFIG: /etc/wireguard/wg0.conf
     volumes:
       - ${MUSIC_DIR}:/music
       - ./state:/state
+      - ./wireguard:/etc/wireguard:ro
     expose:
       - "8090"
     healthcheck:
@@ -75,51 +77,6 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import sqlite3,time; c=sqlite3.connect('/state/app.db'); r=c.execute(\"select heartbeat from service_heartbeat where service='scheduler'\").fetchone(); assert r and time.time()-r[0] < 30"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-
-  wireguard:
-    image: lscr.io/linuxserver/wireguard:latest
-    restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    sysctls:
-      - net.ipv4.conf.all.src_valid_mark=1
-    volumes:
-      - ./wireguard:/config
-      - /lib/modules:/lib/modules:ro
-    healthcheck:
-      test: ["CMD-SHELL", "test -e /sys/class/net/wg0 || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  worker-vpn:
-    build:
-      context: .
-      dockerfile: worker/Dockerfile
-    restart: unless-stopped
-    network_mode: "service:wireguard"
-    depends_on:
-      wireguard:
-        condition: service_started
-    environment:
-      TZ: ${TZ:-Asia/Tokyo}
-      DB_PATH: /state/app.db
-      MUSIC_DIR: /music
-      AUDIO_FORMAT: ${AUDIO_FORMAT:-mp3}
-      AUDIO_BITRATE: ${AUDIO_BITRATE:-320k}
-      WORKER_SERVICE_NAME: worker-vpn
-      ROUTE_WIREGUARD: "1"
-    volumes:
-      - ${MUSIC_DIR}:/music
-      - ./state:/state
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3).read(); import sqlite3,time; c=sqlite3.connect('/state/app.db'); r=c.execute(\"select heartbeat from service_heartbeat where service='worker-vpn'\").fetchone(); assert r and time.time()-r[0] < 30"]
       interval: 15s
       timeout: 5s
       retries: 5
