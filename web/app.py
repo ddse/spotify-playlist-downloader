@@ -145,6 +145,32 @@ async def wireguard_settings():
     return result
 
 
+@app.post('/api/settings/wireguard')
+async def wireguard_toggle(enabled: bool = Form(...)):
+    """Persist and apply the WireGuard preference through the worker."""
+    c = db()
+    value = '1' if enabled else '0'
+    c.execute(
+        "INSERT INTO app_settings(key,value) VALUES('wireguard_enabled',?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (value,),
+    )
+    c.commit()
+    c.close()
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard",
+                data={'enabled': value},
+            )
+            response.raise_for_status()
+            result = response.json()
+            result['enabled'] = enabled
+            return result
+    except Exception as e:
+        return {'enabled': enabled, 'status': 'unavailable', 'error': str(e)}
+
+
 @app.get('/api/settings/connections')
 def provider_connections():
     c=db(); items={p:provider_row(c,p) for p in PROVIDER_DEFAULTS}; c.close(); return {'items':items}
