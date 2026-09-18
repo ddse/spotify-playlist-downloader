@@ -38,8 +38,10 @@ services:
     volumes:
       - ${MUSIC_DIR}:/music
       - ./state:/state
+    expose:
+      - "8090"
     healthcheck:
-      test: ["CMD", "python", "-c", "import sqlite3,time; c=sqlite3.connect('/state/app.db'); r=c.execute(\"select heartbeat from service_heartbeat where service='worker'\").fetchone(); assert r and time.time()-r[0] < 30"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3).read(); import sqlite3,time; c=sqlite3.connect('/state/app.db'); r=c.execute(\"select heartbeat from service_heartbeat where service='worker'\").fetchone(); assert r and time.time()-r[0] < 30"]
       interval: 15s
       timeout: 5s
       retries: 5
