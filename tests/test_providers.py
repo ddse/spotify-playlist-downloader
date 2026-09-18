@@ -55,3 +55,49 @@ def test_nhaccuatui_parser_normalizes_results(monkeypatch):
     assert len(result["items"]) == 1
     assert result["items"][0]["source"] == "nhaccuatui"
     assert result["items"][0]["title"] == "Test Song"
+
+
+def test_zingmp3_parser_handles_nested_search_results(monkeypatch):
+    zing = load_provider("zingmp3")
+    payload = {
+        "data": {"items": [{"section": {"items": [{
+            "encodeId": "ZWTEST01",
+            "title": "Việt Nam Quê Hương Tôi",
+            "alias": "viet-nam-que-huong-toi",
+            "artists": [{"name": "Trọng Tấn"}],
+        }]}}]}
+    }
+
+    class Response:
+        def read(self): return __import__("json").dumps(payload).encode()
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+
+    monkeypatch.setattr(zing.urllib.request, "urlopen", lambda *a, **k: Response())
+    result = zing.search("Việt nam quê hương tôi")
+    assert result["items"][0]["id"] == "ZWTEST01"
+    assert result["items"][0]["title"] == "Việt Nam Quê Hương Tôi"
+    assert result["items"][0]["channel"] == "Trọng Tấn"
+
+
+def test_zingmp3_search_falls_back_to_legacy_endpoint(monkeypatch):
+    zing = load_provider("zingmp3")
+    urls = []
+
+    class Response:
+        def __init__(self, payload): self.payload = payload
+        def read(self): return __import__("json").dumps(self.payload).encode()
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+
+    def fake_urlopen(req, timeout=20):
+        urls.append(req.full_url)
+        if "ac.zingmp3.vn/v1/web/search" in req.full_url:
+            return Response({"data": {"items": []}})
+        return Response({"items": [{"encodeId": "ZWTEST02", "title": "Việt Nam Quê Hương Tôi", "alias": "viet-nam-que-huong-toi", "artists": [{"name": "Thanh Thúy"}]}]})
+
+    monkeypatch.setattr(zing.urllib.request, "urlopen", fake_urlopen)
+    result = zing.search("Việt nam quê hương tôi")
+    assert len(result["items"]) == 1
+    assert result["items"][0]["id"] == "ZWTEST02"
+    assert any("ac.mp3.zing.vn/complete" in url for url in urls)
