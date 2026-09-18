@@ -101,14 +101,14 @@ Only download content you are legally entitled to access or store. The project d
 
 ## Optional WireGuard routing
 
-The application can run two download workers:
+The application uses **one worker container**. WireGuard is enabled or disabled dynamically inside that worker:
 
-- **Normal worker**: direct Internet connection.
-- **WireGuard worker**: YouTube search/download traffic exits through the WireGuard tunnel.
+- **WireGuard OFF**: YouTube search/download traffic uses the normal Internet route.
+- **WireGuard ON**: the same worker brings up `wg0`, and YouTube traffic uses the WireGuard tunnel.
 
 Spotify API traffic remains on the normal web container network.
 
-The UI Settings dialog contains **Use WireGuard for YouTube**. When enabled, new YouTube searches and newly queued downloads use the WireGuard worker. When disabled, they use the normal worker. Each queued track stores its route, so changing the setting does not move an already queued job between workers.
+The UI Settings dialog contains **Use WireGuard for YouTube**. Saving the setting immediately switches the worker route. New downloads store the selected route in the queue, so changing the global setting does not move an already queued job between routes.
 
 ### WireGuard setup
 
@@ -123,6 +123,6 @@ docker compose up -d --build
 docker compose ps
 ```
 
-The real `wireguard/wg0.conf` is ignored by Git.
+The real `wireguard/wg0.conf` is ignored by Git. The worker needs `NET_ADMIN` (and `SYS_MODULE` when the host kernel module must be loaded) to manage the WireGuard interface.
 
-The WireGuard worker shares the WireGuard container's network namespace. The web container reaches that worker through `http://wireguard:8090`; the normal worker remains at `http://worker-normal:8090`.
+When the setting is changed while a download is running, the toggle waits for that download to finish before changing the route, preventing a route switch in the middle of a download.
