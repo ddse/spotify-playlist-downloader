@@ -6,12 +6,13 @@ import threading
 from search import serve as serve_search_api
 from yt_dlp.utils import DownloadError
 
+from wireguard import manager
+
 DB_PATH = os.getenv('DB_PATH', '/state/app.db')
 MUSIC_DIR = os.getenv('MUSIC_DIR', '/music')
 FMT = os.getenv('AUDIO_FORMAT', 'mp3')
 BITRATE = os.getenv('AUDIO_BITRATE', '320K')
 SERVICE_NAME = os.getenv('WORKER_SERVICE_NAME', 'worker')
-ROUTE_WIREGUARD = os.getenv('ROUTE_WIREGUARD', '0') in {'1','true','yes','on'}
 
 
 def conn():
@@ -22,6 +23,7 @@ def conn():
 def init(c):
     from database import init_db
     init_db(c)
+
 
 def heartbeat(c, detail='idle'):
     c.execute(
@@ -126,8 +128,6 @@ def download(row, c, track_id):
     }
 
     if download_type == 'audio':
-        # Do not require the source stream itself to already be mp3/m4a/etc.
-        # YouTube commonly serves webm/mp4 audio and ffmpeg converts it later.
         audio_format = download_format if download_format in {'m4a','mp3','opus','wav','flac'} else 'mp3'
         audio_quality = download_quality if download_quality in {'0','128','192','256','320','best'} else '320'
         opts['format'] = 'bestaudio/best'
@@ -145,11 +145,6 @@ def download(row, c, track_id):
     else:
         quality = download_quality if download_quality in {'best','2160','1440','1080','720','480','360'} else 'best'
         height = '' if quality == 'best' else f'[height<={quality}]'
-
-        # Keep the selector permissive and let yt-dlp choose formats actually
-        # exposed by the current YouTube player client. Strict ext/codec filters
-        # can produce "Requested format is not available" even when usable
-        # formats exist.
         if download_format == 'ios':
             vsel = f"bestvideo[vcodec~='^(avc|h264)']{height}"
             fallback_vsel = f"bestvideo{height}"
@@ -192,8 +187,7 @@ while True:
         heartbeat(c)
 
         row = c.execute(
-            "SELECT * FROM tracks WHERE status='queued' AND source_url IS NOT NULL AND COALESCE(wireguard,0)=? ORDER BY created_at LIMIT 1",
-            (1 if ROUTE_WIREGUARD else 0,)
+            "SELECT * FROM tracks WHERE status='queued' AND source_url IS NOT NULL ORDER BY priority DESC, created_at LIMIT 1"
         ).fetchone()
 
         if not row:
@@ -202,6 +196,7 @@ while True:
             continue
 
         track_id = row['spotify_id']
+        use_wireguard = bool(row['wireguard'])
         c.execute(
             "UPDATE tracks SET status='downloading',progress=1,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
             (track_id,),
@@ -210,13 +205,16 @@ while True:
         heartbeat(c, 'starting:' + track_id)
 
         try:
-            download(row, c, track_id)
+            manager.run_download(
+                use_wireguard,
+                lambda: download(row, c, track_id),
+            )
             c.execute(
                 "UPDATE tracks SET status='completed',progress=100,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
                 (track_id,),
             )
         except Exception as e:
-            err = format_error(e, '\n'.join(log_lines) if 'log_lines' in locals() else '')
+            err = format_error(e, '\n'.join(locals().get('log_lines', [])))
             c.execute(
                 "UPDATE tracks SET status='failed',progress=0,error=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
                 (err, track_id),
