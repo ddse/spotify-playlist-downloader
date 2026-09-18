@@ -16,7 +16,7 @@ def load_app(tmp_path, monkeypatch):
     (tmp_path / "static" / "assets").mkdir(parents=True)
     (tmp_path / "templates").mkdir()
     repo = os.path.dirname(os.path.dirname(__file__))
-    os.chdir(repo)
+    os.chdir(tmp_path)
     sys.path.insert(0, os.path.join(repo, "web"))
     sys.path.insert(0, repo)
 
