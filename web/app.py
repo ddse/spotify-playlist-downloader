@@ -70,6 +70,15 @@ def provider_row(c, provider):
     if cfg.get('cookies'): safe['cookies']='********'
     return {'provider':provider,'enabled':bool(row['enabled']),'config':safe,'configured':configured,'status':row['status'] or 'not_configured','error':row['error'] or '','last_tested_at':row['last_tested_at']}
 
+@app.get('/api/settings/wireguard')
+async def wireguard_settings():
+    """Return the persisted WireGuard preference used by the frontend."""
+    return {
+        'enabled': wireguard_enabled(),
+        'interface': os.getenv('WG_INTERFACE', 'wg0'),
+    }
+
+
 @app.get('/api/settings/connections')
 def provider_connections():
     c=db(); items={p:provider_row(c,p) for p in PROVIDER_DEFAULTS}; c.close(); return {'items':items}
