@@ -8,11 +8,48 @@ from yt_dlp.utils import DownloadError
 
 import wireguard as manager
 
+import re
+import urllib.request
+import xml.etree.ElementTree as ET
+from urllib.parse import urlparse
+
+def is_nhaccuatui(url):
+    try:
+        host = (urlparse(url).hostname or '').lower()
+        return host == 'nhaccuatui.com' or host.endswith('.nhaccuatui.com')
+    except Exception:
+        return False
+
+def resolve_nhaccuatui(url):
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        html = r.read().decode('utf-8', errors='ignore')
+    match = re.search(r'player\.peConfig\.xmlURL\s*=\s*"([^"]+)"', html)
+    if not match:
+        raise RuntimeError('NhacCuaTui: player XML URL not found')
+    xml_url = match.group(1).replace('\\/', '/')
+    req = urllib.request.Request(xml_url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        xml_data = r.read()
+    root = ET.fromstring(xml_data)
+    tracks = root.findall('.//track')
+    if not tracks:
+        raise RuntimeError('NhacCuaTui: no track found in XML')
+    track = tracks[0]
+    def value(name):
+        node = track.find(name)
+        return (node.text or '').strip() if node is not None else ''
+    direct = value('location')
+    title = value('title') or url.rstrip('/').split('/')[-1].split('.')[0]
+    if not direct:
+        raise RuntimeError('NhacCuaTui: direct audio URL not found')
+    return {'url': direct, 'title': title}
+
+
 DB_PATH = os.getenv('DB_PATH', '/state/app.db')
 MUSIC_DIR = os.getenv('MUSIC_DIR', '/music')
 FMT = os.getenv('AUDIO_FORMAT', 'mp3')
 BITRATE = os.getenv('AUDIO_BITRATE', '320K')
-SERVICE_NAME = os.getenv('WORKER_SERVICE_NAME', 'worker')
 
 
 def conn():
@@ -24,21 +61,54 @@ def init(c):
     from database import init_db
     init_db(c)
 
-
 def heartbeat(c, detail='idle'):
     c.execute(
         '''INSERT INTO service_heartbeat(service,heartbeat,detail)
            VALUES(?,?,?)
            ON CONFLICT(service) DO UPDATE SET heartbeat=excluded.heartbeat,detail=excluded.detail''',
-        (SERVICE_NAME, time.time(), detail),
+        ('worker', time.time(), detail),
     )
     c.commit()
 
+
+def download_nhaccuatui(row, c, track_id):
+    resolved = resolve_nhaccuatui(row['source_url'])
+    Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
+    artist = (row['artists'] or 'NhacCuaTui').replace('/', '_')
+    album = (row['album'] or 'NhacCuaTui').replace('/', '_')
+    title = (row['title'] or resolved['title'] or 'Unknown Title').replace('/', '_')
+    custom_folder = (row['download_folder'] or '').strip()
+    folder = Path(MUSIC_DIR) / custom_folder if custom_folder else Path(MUSIC_DIR) / artist / album
+    folder.mkdir(parents=True, exist_ok=True)
+    output = folder / f'{title}.mp3'
+    req = urllib.request.Request(resolved['url'], headers={'User-Agent': 'Mozilla/5.0',
+                                                            'Referer': row['source_url']})
+    with urllib.request.urlopen(req, timeout=30) as response, open(output, 'wb') as fp:
+        total = int(response.headers.get('Content-Length') or 0)
+        downloaded = 0
+        last_update = 0.0
+        while True:
+            chunk = response.read(1024 * 256)
+            if not chunk:
+                break
+            fp.write(chunk)
+            downloaded += len(chunk)
+            now = time.time()
+            if now - last_update >= 1:
+                percent = int(downloaded * 100 / total) if total else 1
+                c.execute('UPDATE tracks SET progress=?,downloaded_bytes=?,total_bytes=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
+                          (max(1, min(99, percent)), downloaded, total, track_id))
+                c.commit()
+                heartbeat(c, 'downloading:' + track_id)
+                last_update = now
 
 def download(row, c, track_id):
     Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
     url = row['source_url']
     source_mode = row['source_mode'] or 'single'
+    if is_nhaccuatui(url):
+        download_nhaccuatui(row, c, track_id)
+        return
     if not url:
         raise RuntimeError('No download source selected')
 
@@ -128,6 +198,8 @@ def download(row, c, track_id):
     }
 
     if download_type == 'audio':
+        # Do not require the source stream itself to already be mp3/m4a/etc.
+        # YouTube commonly serves webm/mp4 audio and ffmpeg converts it later.
         audio_format = download_format if download_format in {'m4a','mp3','opus','wav','flac'} else 'mp3'
         audio_quality = download_quality if download_quality in {'0','128','192','256','320','best'} else '320'
         opts['format'] = 'bestaudio/best'
@@ -145,6 +217,11 @@ def download(row, c, track_id):
     else:
         quality = download_quality if download_quality in {'best','2160','1440','1080','720','480','360'} else 'best'
         height = '' if quality == 'best' else f'[height<={quality}]'
+
+        # Keep the selector permissive and let yt-dlp choose formats actually
+        # exposed by the current YouTube player client. Strict ext/codec filters
+        # can produce "Requested format is not available" even when usable
+        # formats exist.
         if download_format == 'ios':
             vsel = f"bestvideo[vcodec~='^(avc|h264)']{height}"
             fallback_vsel = f"bestvideo{height}"
@@ -196,7 +273,6 @@ while True:
             continue
 
         track_id = row['spotify_id']
-        use_wireguard = bool(row['wireguard'])
         c.execute(
             "UPDATE tracks SET status='downloading',progress=1,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
             (track_id,),
@@ -204,6 +280,7 @@ while True:
         c.commit()
         heartbeat(c, 'starting:' + track_id)
 
+        use_wireguard = bool(row['wireguard'])
         try:
             manager.run_download(
                 use_wireguard,
@@ -214,7 +291,7 @@ while True:
                 (track_id,),
             )
         except Exception as e:
-            err = format_error(e, '\n'.join(locals().get('log_lines', [])))
+            err = format_error(e, '\n'.join(log_lines) if 'log_lines' in locals() else '')
             c.execute(
                 "UPDATE tracks SET status='failed',progress=0,error=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
                 (err, track_id),
