@@ -59,6 +59,11 @@ def init(c):
     if 'auto_start' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN auto_start INTEGER DEFAULT 1")
     if 'priority' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN priority INTEGER DEFAULT 0")
     if 'source_mode' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN source_mode TEXT DEFAULT 'single'")
+    if 'playlist_item_limit' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN playlist_item_limit INTEGER DEFAULT 0")
+    if 'downloaded_bytes' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN downloaded_bytes INTEGER DEFAULT 0")
+    if 'total_bytes' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN total_bytes INTEGER DEFAULT 0")
+    if 'download_speed' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN download_speed TEXT DEFAULT ''")
+    if 'eta' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN eta TEXT DEFAULT ''")
 
     c.execute("""
         UPDATE tracks
