@@ -47,8 +47,19 @@ async def api_health():
     c=db(); w=worker_state(c,'worker'); s=worker_state(c,'scheduler'); c.close(); return {'ok':True,'spotify_connected':bool(await access_token()),'worker':w,'scheduler':s,'wireguard':wireguard_enabled()}
 
 @app.get('/api/services')
-def services():
-    c=db(); result={k:worker_state(c,k) for k in ('worker','scheduler')}; result['wireguard']={'enabled':wireguard_enabled()}; c.close(); return result
+async def services():
+    c=db(); result={k:worker_state(c,k) for k in ('worker','scheduler')}; c.close()
+    result['wireguard']={'enabled':wireguard_enabled(),'interface':'wg0','status':'unknown'}
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
+            response.raise_for_status()
+            wg=response.json()
+            result['wireguard']={'enabled':bool(wg.get('enabled')),'interface':wg.get('interface','wg0'),'status':'connected' if wg.get('enabled') else 'disconnected'}
+    except Exception as e:
+        result['wireguard']['status']='unavailable'
+        result['wireguard']['detail']=str(e)
+    return result
 
 @app.get('/api/settings/wireguard')
 def get_wireguard_setting():
