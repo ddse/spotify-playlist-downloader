@@ -10,16 +10,16 @@ services:
       TZ: ${TZ:-Asia/Tokyo}
       DB_PATH: /state/app.db
       MUSIC_DIR: /music
-      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID}
-      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET}
-      SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI}
-      SYNC_TOKEN: ${SYNC_TOKEN}
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+      SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI:-}
+      SYNC_TOKEN: ${SYNC_TOKEN:-}
       WORKER_ENDPOINT: http://worker:8090
     depends_on:
       worker:
         condition: service_started
     volumes:
-      - ${MUSIC_DIR}:/music
+      - ${MUSIC_DIR:-./music}:/music
       - ./state:/state
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
@@ -50,7 +50,7 @@ services:
       WORKER_SERVICE_NAME: worker
       WG_CONFIG: /etc/wireguard/wg0.conf
     volumes:
-      - ${MUSIC_DIR}:/music
+      - ${MUSIC_DIR:-./music}:/music
       - ./state:/state
       - ./wireguard:/etc/wireguard:ro
       - /lib/modules:/lib/modules:ro
@@ -73,7 +73,7 @@ services:
       TZ: ${TZ:-Asia/Tokyo}
       DB_PATH: /state/app.db
       SYNC_ENDPOINT: http://web:8080
-      SYNC_TOKEN: ${SYNC_TOKEN}
+      SYNC_TOKEN: ${SYNC_TOKEN:-}
       SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-30}
     volumes:
       - ./state:/state
