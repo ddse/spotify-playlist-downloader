@@ -125,6 +125,8 @@ def status():
         return {
             "enabled": up,
             "interface": INTERFACE,
+            "config_path": CONFIG,
+            "config_exists": os.path.isfile(CONFIG),
             "route_active": route_active,
             "handshake_recent": handshake_recent,
             "vpn_route": vpn_route,
