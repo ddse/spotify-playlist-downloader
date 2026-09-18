@@ -24,6 +24,8 @@ export default function Settings({onClose}) {
   const [testing,setTesting]=useState(false);
   const [message,setMessage]=useState('');
   const [wireguard,setWireguard]=useState(null);
+  const [wireguardFiles,setWireguardFiles]=useState([]);
+  const [findingWireguard,setFindingWireguard]=useState(false);
   useEffect(()=>{
     api('/api/settings/connections').then(d=>setItems(d.items||{})).catch(e=>setMessage(e.message));
     api('/api/settings/wireguard').then(setWireguard).catch(e=>setWireguard({status:'unavailable',detail:e.message}));
@@ -33,6 +35,7 @@ export default function Settings({onClose}) {
   const config={...(item.config||{})};
   const set=(k,v)=>setItems(x=>({...x,[selected]:{...item,config:{...(x[selected]?.config||{}),[k]:v}}}));
   const save=async()=>{setSaving(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:item.enabled,config})});setItems(x=>({...x,[selected]:d}));setMessage('Saved. No restart required.')}catch(e){setMessage(e.message)}finally{setSaving(false)}};
+  const findWireguard=async()=>{setFindingWireguard(true);setMessage('');try{const d=await api('/api/settings/wireguard/files');setWireguardFiles(d.files||[]);if(!(d.files||[]).length)setMessage('No WireGuard .conf files found in the mounted directory');}catch(e){setMessage(e.message)}finally{setFindingWireguard(false)}};
   const test=async()=>{setTesting(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected+'/test',{method:'POST'});setMessage(d.ok?'Connection test successful':(d.error||'Connection test failed'));setItems(x=>({...x,[selected]:{...x[selected],status:d.status,error:d.error||''}}));}catch(e){setMessage(e.message)}finally{setTesting(false)}};
   return <div className="glass mt-4 rounded-2xl p-5">
     <div className="flex items-center justify-between border-b border-white/10 pb-4"><div><h2 className="text-lg font-semibold">Provider Connections</h2><p className="text-xs text-zinc-500">Settings are stored in the application database and applied at runtime.</p></div><button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-2 text-sm">Close</button></div>
@@ -49,6 +52,11 @@ export default function Settings({onClose}) {
         <div>Public IP: <span className="text-zinc-200">{wireguard?.public_ip||'—'}</span></div>
         <div className="md:col-span-3">Config path: <span className="text-zinc-200">{wireguard?.config_path||'/etc/wireguard/wg0.conf'}</span></div>
       </div>
+      <div className="mt-3 flex items-center gap-2">
+        <button onClick={findWireguard} disabled={findingWireguard} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs">{findingWireguard?'Finding...':'Find config'}</button>
+        {wireguardFiles.length>0&&<span className="text-xs text-emerald-300">{wireguardFiles.length} config file{wireguardFiles.length===1?'':'s'} found</span>}
+      </div>
+      {wireguardFiles.length>0&&<div className="mt-2 space-y-1">{wireguardFiles.map(x=><div key={x.path} className="rounded-lg bg-black/20 px-3 py-2 font-mono text-xs text-zinc-300">{x.path}</div>)}</div>}
       {!wireguard?.config_exists&&<div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-200">WireGuard config is not mounted. Create <code>wireguard/wg0.conf</code> from the example and restart the worker.</div>}
       {wireguard?.detail&&<div className="mt-2 text-xs text-red-300">{wireguard.detail}</div>}
     </div>
