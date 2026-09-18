@@ -109,6 +109,19 @@ def status():
         handshake_recent, peers = _handshake_status() if up else (False, [])
         public_ip = _public_ip() if up and route_active else ""
         vpn_route = up and route_active and handshake_recent and bool(public_ip)
+        transfer = {"receive_bytes": 0, "send_bytes": 0}
+        try:
+            raw = subprocess.run(
+                ["wg", "show", INTERFACE, "transfer"],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            ).stdout.strip()
+            for line in raw.splitlines():
+                parts = line.split()
+                if len(parts) >= 3:
+                    transfer["receive_bytes"] += int(parts[1])
+                    transfer["send_bytes"] += int(parts[2])
+        except Exception:
+            pass
         return {
             "enabled": up,
             "interface": INTERFACE,
@@ -118,5 +131,7 @@ def status():
             "public_ip": public_ip,
             "peer_count": len(peers),
             "peers": peers,
+            "receive_bytes": transfer["receive_bytes"],
+            "send_bytes": transfer["send_bytes"],
             "default_routes": routes,
         }
