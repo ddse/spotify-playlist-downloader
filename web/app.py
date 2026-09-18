@@ -5,6 +5,7 @@ from fastapi import FastAPI, Form, Request, Header, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from database import db
 from spotify import authorize_url, exchange, access_token, public_search, playlist_items, playlist_info
 from youtube import search as youtube_search
 
@@ -22,7 +23,6 @@ def wireguard_enabled():
 app=FastAPI(title='Music Downloader v3'); templates=Jinja2Templates(directory='templates')
 app.mount('/assets', StaticFiles(directory='static/assets'), name='assets')
 
-from database import db
 
 def pid(url):
     m=re.search(r'playlist/([A-Za-z0-9]+)',url); return m.group(1) if m else url.rstrip('/').split('/')[-1].split('?')[0]
@@ -44,7 +44,7 @@ async def health(): return {'ok':True}
 
 @app.get('/api/health')
 async def api_health():
-    c=db(); w=worker_state(c,'worker'); s=worker_state(c,'scheduler'); c.close(); return {'ok':True,'spotify_connected':bool(await access_token()),'worker':w,'scheduler':s}
+    c=db(); w=worker_state(c,'worker'); s=worker_state(c,'scheduler'); v=worker_state(c,'worker-vpn'); c.close(); return {'ok':True,'spotify_connected':bool(await access_token()),'worker':w,'worker-vpn':v,'scheduler':s,'wireguard':wireguard_enabled()}
 
 @app.get('/api/services')
 def services():
@@ -218,7 +218,7 @@ def prioritize_queue(track_id:str):
     c=db(); c.execute("UPDATE tracks SET priority=priority+1,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status IN ('queued','paused')",(track_id,)); c.commit(); c.close(); return {'ok':True}
 
 @app.post('/api/import/youtube')
-def import_youtube(source_url:str=Form(...),source_mode:str=Form('playlist'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('320'),download_folder:str=Form('YouTube'),playlist_item_limit:str=Form('0'),wireguard:str=Form('0')):
+def import_youtube(source_url:str=Form(...),source_mode:str=Form('playlist'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('320'),download_folder:str=Form('YouTube'),playlist_item_limit:str=Form('0'),wireguard:str=Form('')):
     title = source_url.rstrip('/').split('/')[-1].split('?')[0] or 'YouTube import'
     return download(source_url=source_url,title=title,artists='YouTube',album=source_mode,youtube_id='',source_mode=source_mode,download_type=download_type,download_format=download_format,download_quality=download_quality,video_codec='auto',download_folder=download_folder,thumbnail='1',subtitle='0',subtitle_lang='ja,en',subtitle_mode='prefer_manual',playlist_item_limit=playlist_item_limit,split_chapters='0',auto_start='1',wireguard=wireguard)
 
