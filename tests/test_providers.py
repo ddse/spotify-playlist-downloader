@@ -101,3 +101,40 @@ def test_zingmp3_search_falls_back_to_legacy_endpoint(monkeypatch):
     assert len(result["items"]) == 1
     assert result["items"][0]["id"] == "ZWTEST02"
     assert any("ac.mp3.zing.vn/complete" in url for url in urls)
+
+
+def test_nhaccuatui_parser_supports_current_song_links(monkeypatch):
+    nct = load_provider("nhaccuatui")
+    html = b'''
+      <a href="https://www.nhaccuatui.com/song/4ZPNUOHU7t?source=app"><span>Việt Nam Quê Hương Tôi</span></a>
+      <a href="https://www.nhaccuatui.com/song/4ZPNUOHU7t?source=app"><span>duplicate</span></a>
+    '''
+    class Response:
+        def read(self): return html
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    monkeypatch.setattr(nct.urllib.request, "urlopen", lambda *a, **k: Response())
+    result = nct.search("Việt nam quê hương tôi")
+    assert len(result["items"]) == 1
+    assert result["items"][0]["title"] == "Việt Nam Quê Hương Tôi"
+
+
+def test_zingmp3_parser_supports_html_fallback(monkeypatch):
+    zing = load_provider("zingmp3")
+    html = b'''
+      <a href="https://zingmp3.vn/bai-hat/viet-nam-que-huong-toi/ZWHTML01.html">
+        <span>Việt Nam Quê Hương Tôi</span>
+      </a>
+    '''
+    class Response:
+        def read(self): return html
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    def fake_urlopen(req, timeout=20):
+        if "zingmp3.vn/tim-kiem/bai-hat" in req.full_url:
+            return Response()
+        return Response()
+    monkeypatch.setattr(zing.urllib.request, "urlopen", fake_urlopen)
+    result = zing.search("Việt nam quê hương tôi")
+    assert result["items"][0]["id"] == "ZWHTML01"
+    assert result["items"][0]["title"] == "Việt Nam Quê Hương Tôi"
