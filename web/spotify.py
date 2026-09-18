@@ -2,7 +2,16 @@ import base64, hashlib, os, secrets, sqlite3, time, json
 from urllib.parse import urlencode
 import httpx
 
-DB_PATH=os.getenv('DB_PATH','/state/app.db')\nDEFAULT_CLIENT_ID=os.getenv('SPOTIFY_CLIENT_ID',''); DEFAULT_CLIENT_SECRET=os.getenv('SPOTIFY_CLIENT_SECRET',''); DEFAULT_REDIRECT_URI=os.getenv('SPOTIFY_REDIRECT_URI','http://localhost:8088/api/spotify/callback')\n\ndef spotify_config():\n    c=db(); row=c.execute("SELECT config_json FROM provider_connections WHERE provider='spotify'").fetchone(); c.close()\n    cfg=json.loads(row['config_json']) if row and row['config_json'] else {}\n    return cfg\n\ndef spotify_credentials():\n    cfg=spotify_config(); return (cfg.get('client_id') or DEFAULT_CLIENT_ID, cfg.get('client_secret') or DEFAULT_CLIENT_SECRET, cfg.get('redirect_uri') or DEFAULT_REDIRECT_URI)
+DB_PATH=os.getenv('DB_PATH','/state/app.db')
+DEFAULT_CLIENT_ID=os.getenv('SPOTIFY_CLIENT_ID',''); DEFAULT_CLIENT_SECRET=os.getenv('SPOTIFY_CLIENT_SECRET',''); DEFAULT_REDIRECT_URI=os.getenv('SPOTIFY_REDIRECT_URI','http://localhost:8088/api/spotify/callback')
+
+def spotify_config():
+    c=db(); row=c.execute("SELECT config_json FROM provider_connections WHERE provider='spotify'").fetchone(); c.close()
+    cfg=json.loads(row['config_json']) if row and row['config_json'] else {}
+    return cfg
+
+def spotify_credentials():
+    cfg=spotify_config(); return (cfg.get('client_id') or DEFAULT_CLIENT_ID, cfg.get('client_secret') or DEFAULT_CLIENT_SECRET, cfg.get('redirect_uri') or DEFAULT_REDIRECT_URI)
 SCOPES='playlist-read-private playlist-read-collaborative user-read-private'
 
 def db():
@@ -52,7 +61,8 @@ async def public_search(q):
     if token:
         return await api('/search',{'q':q,'type':'track','limit':10})
 
-    CLIENT_ID,CLIENT_SECRET,_=spotify_credentials()\n    if not CLIENT_ID or not CLIENT_SECRET:
+    CLIENT_ID,CLIENT_SECRET,_=spotify_credentials()
+    if not CLIENT_ID or not CLIENT_SECRET:
         return {'tracks':{'items':[]}}
 
     raw=base64.b64encode(f'{CLIENT_ID}:{CLIENT_SECRET}'.encode()).decode()
