@@ -1,8 +1,6 @@
 import importlib.util
 import pathlib
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "worker"))
-
 
 def load_provider(name):
     spec = importlib.util.spec_from_file_location(
