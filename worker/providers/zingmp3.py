@@ -3,7 +3,7 @@ from urllib.parse import quote
 
 def search(query,page=1,limit=10):
     page=max(1,int(page)); limit=max(1,min(int(limit),10))
-    url=f"https://ac.zingmp3.vn/v1/web/search?num={limit}&page={page}&query={quote(query)}"
+    url=f"https://ac.zingmp3.vn/v1/web/search?num={limit}&page={page}&query={quote(query, safe='')}"
     req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0","Referer":"https://zingmp3.vn/","Accept":"application/json"})
     with urllib.request.urlopen(req,timeout=20) as r: data=json.loads(r.read().decode("utf-8","ignore"))
     items=[]
