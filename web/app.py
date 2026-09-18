@@ -107,7 +107,7 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
       ON CONFLICT(spotify_id) DO UPDATE SET title=excluded.title,artists=excluded.artists,album=excluded.album,source_type=excluded.source_type,source_url=excluded.source_url,download_type=excluded.download_type,download_format=excluded.download_format,download_quality=excluded.download_quality,video_codec=excluded.video_codec,download_folder=excluded.download_folder,thumbnail=excluded.thumbnail,subtitle=excluded.subtitle,subtitle_lang=excluded.subtitle_lang,subtitle_mode=excluded.subtitle_mode,playlist_item_limit=excluded.playlist_item_limit,split_chapters=excluded.split_chapters,auto_start=excluded.auto_start,status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,error=NULL,updated_at=CURRENT_TIMESTAMP''',
       (key,title,artists,album,source_url,'youtube',source_url,download_type,download_format,download_quality,video_codec,folder,source_mode,thumb,subs,subtitle_lang,subtitle_mode,item_limit,chapters,start))
     c.commit(); c.close()
-    return RedirectResponse('/',303)
+    return {'ok': True, 'id': key, 'status': 'queued'}
 
 @app.post('/api/queue/{track_id}/start')
 def start_queue(track_id:str):
