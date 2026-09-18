@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax
+        run: python -m compileall -q database.py web worker tests
+      - name: Automation tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Frontend build
+        working-directory: web
+        run: |
+          npm install
+          npm run build
+      - name: Docker Compose validation
+        run: docker compose config

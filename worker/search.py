@@ -1,17 +1,18 @@
 import json
-import os
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import yt_dlp
 
+import wireguard as manager
+
 PAGE_SIZE = 10
 MAX_SEARCH_RESULTS = 50
-HOST = os.getenv("WORKER_API_HOST", "0.0.0.0")
-PORT = int(os.getenv("WORKER_API_PORT", "8090"))
+HOST = "0.0.0.0"
+PORT = 8090
 
 
-def search(query: str, page: int = 1, limit: int = PAGE_SIZE):
+def _search(query: str, page: int = 1, limit: int = PAGE_SIZE):
     query = query.strip()
     page = max(1, int(page))
     limit = max(1, min(int(limit), PAGE_SIZE))
@@ -65,6 +66,11 @@ def search(query: str, page: int = 1, limit: int = PAGE_SIZE):
     }
 
 
+def search(query: str, page: int = 1, limit: int = PAGE_SIZE, wireguard=None):
+    use_wireguard = manager.setting_enabled() if wireguard is None else bool(wireguard)
+    return manager.run(use_wireguard, lambda: _search(query, page, limit))
+
+
 class Handler(BaseHTTPRequestHandler):
     def _json(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode()
@@ -78,6 +84,11 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/health":
             return self._json(200, {"ok": True, "service": "worker"})
+        if parsed.path == "/api/wireguard":
+            try:
+                return self._json(200, manager.status())
+            except Exception as exc:
+                return self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
         if parsed.path != "/api/search/youtube":
             return self._json(404, {"error": "not found"})
 
@@ -85,9 +96,11 @@ class Handler(BaseHTTPRequestHandler):
         query = params.get("q", [""])[0]
         page = params.get("page", ["1"])[0]
         limit = params.get("limit", [str(PAGE_SIZE)])[0]
+        wireguard = params.get("wireguard", [None])[0]
+        use_wireguard = None if wireguard is None else wireguard.lower() in {"1", "true", "yes", "on"}
 
         try:
-            result = search(query, int(page), int(limit))
+            result = search(query, int(page), int(limit), use_wireguard)
             self._json(200, result)
         except Exception as exc:
             self._json(500, {
@@ -97,6 +110,21 @@ class Handler(BaseHTTPRequestHandler):
                 "has_more": False,
                 "error": f"{type(exc).__name__}: {exc}",
             })
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/wireguard":
+            return self._json(404, {"error": "not found"})
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length).decode("utf-8") if length else ""
+            params = parse_qs(body)
+            enabled = params.get("enabled", ["0"])[0].lower() in {"1", "true", "yes", "on"}
+            manager.set_enabled(enabled)
+            return self._json(200, manager.status())
+        except Exception as exc:
+            return self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
 
     def log_message(self, fmt, *args):
         print(f"[worker-api] {fmt % args}", flush=True)

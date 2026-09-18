@@ -5,14 +5,24 @@ from fastapi import FastAPI, Form, Request, Header, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from database import db
 from spotify import authorize_url, exchange, access_token, public_search, playlist_items, playlist_info
 from youtube import search as youtube_search
 
 DB_PATH=os.getenv('DB_PATH','/state/app.db'); SYNC_TOKEN=os.getenv('SYNC_TOKEN','')
+WIREGUARD_ENV_DEFAULT=os.getenv('WIREGUARD_DEFAULT','0') in {'1','true','yes','on'}
+
+def wireguard_enabled():
+    c=db(); row=c.execute("SELECT value FROM app_settings WHERE key='wireguard_enabled'").fetchone()
+    if row is None:
+        value=1 if WIREGUARD_ENV_DEFAULT else 0
+        c.execute("INSERT OR IGNORE INTO app_settings(key,value) VALUES('wireguard_enabled',?)",(str(value),)); c.commit()
+    else:
+        value=row['value'] == '1'
+    c.close(); return value
 app=FastAPI(title='Music Downloader v3'); templates=Jinja2Templates(directory='templates')
 app.mount('/assets', StaticFiles(directory='static/assets'), name='assets')
 
-from database import db
 
 def pid(url):
     m=re.search(r'playlist/([A-Za-z0-9]+)',url); return m.group(1) if m else url.rstrip('/').split('/')[-1].split('?')[0]
@@ -34,11 +44,62 @@ async def health(): return {'ok':True}
 
 @app.get('/api/health')
 async def api_health():
-    c=db(); w=worker_state(c,'worker'); s=worker_state(c,'scheduler'); c.close(); return {'ok':True,'spotify_connected':bool(await access_token()),'worker':w,'scheduler':s}
+    c=db(); w=worker_state(c,'worker'); s=worker_state(c,'scheduler'); c.close(); return {'ok':True,'spotify_connected':bool(await access_token()),'worker':w,'scheduler':s,'wireguard':wireguard_enabled()}
 
 @app.get('/api/services')
-def services():
-    c=db(); result={k:worker_state(c,k) for k in ('worker','scheduler')}; c.close(); return result
+async def services():
+    c=db(); result={k:worker_state(c,k) for k in ('worker','scheduler')}; c.close()
+    result['wireguard']={'enabled':wireguard_enabled(),'interface':'wg0','status':'unknown'}
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
+            response.raise_for_status()
+            wg=response.json()
+            result['wireguard']={
+                'enabled':bool(wg.get('enabled')),
+                'interface':wg.get('interface','wg0'),
+                'status':'connected' if wg.get('vpn_route') else ('routing' if wg.get('enabled') else 'disconnected'),
+                'vpn_route':bool(wg.get('vpn_route')),
+                'route_active':bool(wg.get('route_active')),
+                'handshake_recent':bool(wg.get('handshake_recent')),
+                'public_ip':wg.get('public_ip',''),
+                'receive_bytes':int(wg.get('receive_bytes',0)),
+                'send_bytes':int(wg.get('send_bytes',0)),
+                'peer_count':int(wg.get('peer_count',0)),
+            }
+    except Exception as e:
+        result['wireguard']['status']='unavailable'
+        result['wireguard']['detail']=str(e)
+    return result
+
+@app.get('/api/settings/wireguard')
+def get_wireguard_setting():
+    return {'enabled': wireguard_enabled()}
+
+@app.post('/api/settings/wireguard')
+async def set_wireguard_setting(enabled: bool = Form(False)):
+    # Persist the default for newly queued jobs and immediately switch the
+    # single worker's network route. The worker serializes this with downloads.
+    value='1' if enabled else '0'
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            response = await client.post(
+                f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard",
+                data={'enabled': '1' if enabled else '0'},
+            )
+            response.raise_for_status()
+    except Exception as e:
+        raise HTTPException(503, f'Worker WireGuard toggle failed: {e}')
+
+    c=db()
+    c.execute(
+        "INSERT INTO app_settings(key,value) VALUES('wireguard_enabled',?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (value,),
+    )
+    c.commit()
+    c.close()
+    return {'ok': True, 'enabled': bool(enabled)}
 
 @app.get('/api/spotify/login')
 def spotify_login(): return RedirectResponse(authorize_url())
@@ -91,13 +152,14 @@ async def search_spotify(q:str=''):
     }
 
 @app.get('/api/search/youtube')
-async def search_youtube(q:str='',page:int=1,limit:int=10):
+async def search_youtube(q:str='',page:int=1,limit:int=10,wireguard:bool=None):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit)
+    use_vpn = wireguard_enabled() if wireguard is None else bool(wireguard)
+    try:return await youtube_search(q,page=page,limit=limit,wireguard=use_vpn)
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.post('/api/download')
-def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),source_mode:str=Form('single'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1')):
+def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),source_mode:str=Form('single'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1'),wireguard:str=Form('0')):
     download_type = download_type if download_type in ('audio', 'video', 'captions', 'thumbnail') else 'audio'
     source_mode = source_mode if source_mode in {'single','playlist','channel'} else 'single'
     audio_formats = {'m4a','mp3','opus','wav','flac'}
@@ -129,6 +191,7 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
     subs = 1 if str(subtitle).lower() in {'1','true','on','yes'} else 0
     chapters = 1 if str(split_chapters).lower() in {'1','true','on','yes'} else 0
     start = 1 if str(auto_start).lower() in {'1','true','on','yes'} else 0
+    use_wireguard = 1 if str(wireguard).lower() in {'1','true','on','yes'} else int(wireguard_enabled())
     key=('yt:'+youtube_id if youtube_id else 'url:'+secrets.token_hex(12))+':'+download_type+':'+download_format+':'+download_quality+':'+video_codec+':'+folder+':'+str(item_limit)
     c=db()
     # Use named parameters here so adding/removing a column cannot silently
@@ -154,17 +217,18 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
         'playlist_item_limit': item_limit,
         'split_chapters': chapters,
         'auto_start': start,
+        'wireguard': use_wireguard,
     }
     c.execute('''INSERT INTO tracks(
         spotify_id,title,artists,album,spotify_url,status,progress,error,
         source_type,source_url,download_type,download_format,download_quality,
         video_codec,download_folder,source_mode,thumbnail,subtitle,
-        subtitle_lang,subtitle_mode,playlist_item_limit,split_chapters,auto_start,priority
+        subtitle_lang,subtitle_mode,playlist_item_limit,split_chapters,auto_start,wireguard,priority
     ) VALUES(
         :spotify_id,:title,:artists,:album,:spotify_url,'queued',0,NULL,
         :source_type,:source_url,:download_type,:download_format,:download_quality,
         :video_codec,:download_folder,:source_mode,:thumbnail,:subtitle,
-        :subtitle_lang,:subtitle_mode,:playlist_item_limit,:split_chapters,:auto_start,0
+        :subtitle_lang,:subtitle_mode,:playlist_item_limit,:split_chapters,:auto_start,:wireguard,0
     )
     ON CONFLICT(spotify_id) DO UPDATE SET
         title=excluded.title, artists=excluded.artists, album=excluded.album,
@@ -175,7 +239,7 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
         thumbnail=excluded.thumbnail, subtitle=excluded.subtitle,
         subtitle_lang=excluded.subtitle_lang, subtitle_mode=excluded.subtitle_mode,
         playlist_item_limit=excluded.playlist_item_limit,
-        split_chapters=excluded.split_chapters, auto_start=excluded.auto_start,
+        split_chapters=excluded.split_chapters, auto_start=excluded.auto_start, wireguard=excluded.wireguard,
         status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,
         progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,
         error=NULL, updated_at=CURRENT_TIMESTAMP''', params)
@@ -195,9 +259,9 @@ def prioritize_queue(track_id:str):
     c=db(); c.execute("UPDATE tracks SET priority=priority+1,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status IN ('queued','paused')",(track_id,)); c.commit(); c.close(); return {'ok':True}
 
 @app.post('/api/import/youtube')
-def import_youtube(source_url:str=Form(...),source_mode:str=Form('playlist'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('320'),download_folder:str=Form('YouTube'),playlist_item_limit:str=Form('0')):
+def import_youtube(source_url:str=Form(...),source_mode:str=Form('playlist'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('320'),download_folder:str=Form('YouTube'),playlist_item_limit:str=Form('0'),wireguard:str=Form('')):
     title = source_url.rstrip('/').split('/')[-1].split('?')[0] or 'YouTube import'
-    return download(source_url=source_url,title=title,artists='YouTube',album=source_mode,youtube_id='',source_mode=source_mode,download_type=download_type,download_format=download_format,download_quality=download_quality,video_codec='auto',download_folder=download_folder,thumbnail='1',subtitle='0',subtitle_lang='ja,en',subtitle_mode='prefer_manual',playlist_item_limit=playlist_item_limit,split_chapters='0',auto_start='1')
+    return download(source_url=source_url,title=title,artists='YouTube',album=source_mode,youtube_id='',source_mode=source_mode,download_type=download_type,download_format=download_format,download_quality=download_quality,video_codec='auto',download_folder=download_folder,thumbnail='1',subtitle='0',subtitle_lang='ja,en',subtitle_mode='prefer_manual',playlist_item_limit=playlist_item_limit,split_chapters='0',auto_start='1',wireguard=wireguard)
 
 @app.post('/api/queue/bulk')
 def queue_bulk(action:str=Form(...),ids:str=Form('')):
