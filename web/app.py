@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 from spotify import authorize_url, exchange, access_token, public_search, playlist_items, playlist_info
 from youtube import search as youtube_search
 
-DB_PATH=os.getenv('DB_PATH','/state/app.db'); METUBE_PUBLIC_URL=os.getenv('METUBE_PUBLIC_URL','http://localhost:8081'); SYNC_TOKEN=os.getenv('SYNC_TOKEN','')
+DB_PATH=os.getenv('DB_PATH','/state/app.db'); SYNC_TOKEN=os.getenv('SYNC_TOKEN','')
 app=FastAPI(title='Music Downloader v3'); templates=Jinja2Templates(directory='templates')
 
 def db():
@@ -207,5 +207,3 @@ def jobs():
 def history():
     c=db(); rows=c.execute("SELECT * FROM tracks WHERE status IN ('completed','failed') ORDER BY updated_at DESC LIMIT 200").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
 
-@app.get('/metube')
-def metube_redirect(): return RedirectResponse(METUBE_PUBLIC_URL)
