@@ -10,6 +10,8 @@ DB_PATH = os.getenv('DB_PATH', '/state/app.db')
 MUSIC_DIR = os.getenv('MUSIC_DIR', '/music')
 FMT = os.getenv('AUDIO_FORMAT', 'mp3')
 BITRATE = os.getenv('AUDIO_BITRATE', '320K')
+SERVICE_NAME = os.getenv('WORKER_SERVICE_NAME', 'worker')
+ROUTE_WIREGUARD = os.getenv('ROUTE_WIREGUARD', '0') in {'1','true','yes','on'}
 
 
 def conn():
@@ -26,7 +28,7 @@ def heartbeat(c, detail='idle'):
         '''INSERT INTO service_heartbeat(service,heartbeat,detail)
            VALUES(?,?,?)
            ON CONFLICT(service) DO UPDATE SET heartbeat=excluded.heartbeat,detail=excluded.detail''',
-        ('worker', time.time(), detail),
+        (SERVICE_NAME, time.time(), detail),
     )
     c.commit()
 
@@ -190,7 +192,8 @@ while True:
         heartbeat(c)
 
         row = c.execute(
-            "SELECT * FROM tracks WHERE status='queued' AND source_url IS NOT NULL ORDER BY created_at LIMIT 1"
+            "SELECT * FROM tracks WHERE status='queued' AND source_url IS NOT NULL AND COALESCE(wireguard,0)=? ORDER BY created_at LIMIT 1",
+            (1 if ROUTE_WIREGUARD else 0,)
         ).fetchone()
 
         if not row:
