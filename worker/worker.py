@@ -56,6 +56,7 @@ def init(c):
     if 'split_chapters' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN split_chapters INTEGER DEFAULT 0")
     if 'auto_start' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN auto_start INTEGER DEFAULT 1")
     if 'priority' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN priority INTEGER DEFAULT 0")
+    if 'source_mode' not in cols: c.execute("ALTER TABLE tracks ADD COLUMN source_mode TEXT DEFAULT 'single'")
 
     c.execute("""
         UPDATE tracks
@@ -78,6 +79,7 @@ def heartbeat(c, detail='idle'):
 def download(row, c, track_id):
     Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
     url = row['source_url']
+    source_mode = row['source_mode'] or 'single'
     if not url:
         raise RuntimeError('No download source selected')
 
@@ -150,7 +152,7 @@ def download(row, c, track_id):
 
     opts = {
         'outtmpl': output,
-        'noplaylist': True,
+        'noplaylist': source_mode == 'single',
         'quiet': False,
         'no_warnings': False,
         'logger': YTDLPLogger(),
@@ -163,6 +165,7 @@ def download(row, c, track_id):
         'writeautomaticsub': subtitle and subtitle_mode in {'auto_only','prefer_auto'},
         'subtitleslangs': subtitle_lang.split(','),
         'embedchapters': not split_chapters,
+        'ignoreerrors': False,
     }
 
     if download_type == 'audio':
