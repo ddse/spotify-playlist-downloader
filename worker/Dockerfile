@@ -14,4 +14,5 @@ COPY --from=builder /opt/python-packages /usr/local/lib/python3.13/site-packages
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY worker/worker.py worker/scheduler.py worker/search.py database.py ./
+COPY worker/providers ./providers
 CMD ["python", "worker.py"]
