@@ -29,7 +29,10 @@ export default function Settings({onClose}) {
   const [togglingWireguard,setTogglingWireguard]=useState(false);
   useEffect(()=>{
     api('/api/settings/connections').then(d=>setItems(d.items||{})).catch(e=>setMessage(e.message));
-    api('/api/settings/wireguard').then(setWireguard).catch(e=>setWireguard({status:'unavailable',detail:e.message}));
+    const refreshWireguard=()=>api('/api/settings/wireguard').then(setWireguard).catch(e=>setWireguard(x=>({...x,status:'unavailable',detail:e.message})));
+    refreshWireguard();
+    const timer=setInterval(refreshWireguard,3000);
+    return()=>clearInterval(timer);
   },[]);
   const p=PROVIDERS.find(x=>x.id===selected);
   const item=items[selected]||{provider:selected,enabled:true,configured:false,config:{}};
