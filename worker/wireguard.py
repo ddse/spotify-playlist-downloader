@@ -72,12 +72,31 @@ def _public_ip():
         return ""
 
 def _route_status():
+    """Detect a WireGuard default route, including wg-quick policy routing."""
     try:
         routes = subprocess.run(
-            ["ip", "-4", "route", "show", "0.0.0.0/0"],
+            ["ip", "-4", "route", "show", "table", "all"],
             check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         ).stdout.splitlines()
-        return any(INTERFACE in route for route in routes), routes
+        default_routes = [route for route in routes if route.startswith("default ")]
+        route_active = any(
+            f" dev {INTERFACE}" in route or f" {INTERFACE}" in route
+            for route in default_routes
+        )
+        if not route_active:
+            rules = subprocess.run(
+                ["ip", "-4", "rule", "show"],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            ).stdout.splitlines()
+            has_policy_rule = any(
+                "lookup" in rule or "table" in rule
+                for rule in rules
+            )
+            route_active = has_policy_rule and any(
+                f" dev {INTERFACE}" in route or f" {INTERFACE}" in route
+                for route in routes
+            )
+        return route_active, default_routes
     except Exception:
         return False, []
 
