@@ -1,6 +1,9 @@
 import importlib.util
 import pathlib
+import json
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+
 
 def load_provider(name):
     spec = importlib.util.spec_from_file_location(
@@ -69,7 +72,7 @@ def test_zingmp3_parser_handles_nested_search_results(monkeypatch):
     }
 
     class Response:
-        def read(self): return __import__("json").dumps(payload).encode()
+        def read(self): return json.dumps(payload).encode()
         def __enter__(self): return self
         def __exit__(self, *args): pass
 
@@ -86,7 +89,7 @@ def test_zingmp3_search_falls_back_to_legacy_endpoint(monkeypatch):
 
     class Response:
         def __init__(self, payload): self.payload = payload
-        def read(self): return __import__("json").dumps(self.payload).encode()
+        def read(self): return json.dumps(self.payload).encode()
         def __enter__(self): return self
         def __exit__(self, *args): pass
 
@@ -130,11 +133,27 @@ def test_zingmp3_parser_supports_html_fallback(monkeypatch):
         def read(self): return html.encode('utf-8')
         def __enter__(self): return self
         def __exit__(self, *args): pass
-    def fake_urlopen(req, timeout=20):
-        if "zingmp3.vn/tim-kiem/bai-hat" in req.full_url:
-            return Response()
-        return Response()
-    monkeypatch.setattr(zing.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(zing.urllib.request, "urlopen", lambda *a, **k: Response())
     result = zing.search("Việt nam quê hương tôi")
     assert result["items"][0]["id"] == "ZWHTML01"
     assert result["items"][0]["title"] == "Việt Nam Quê Hương Tôi"
+
+
+def test_vietnamese_search_sources_do_not_toggle_wireguard(monkeypatch):
+    search_mod = importlib.util.spec_from_file_location("worker_search", ROOT / "worker" / "search.py")
+    module = importlib.util.module_from_spec(search_mod)
+    search_mod.loader.exec_module(module)
+
+    calls = []
+
+    def fake_run(enabled, func):
+        calls.append(enabled)
+        return func()
+
+    monkeypatch.setattr(module.manager, "run", fake_run)
+    monkeypatch.setattr(module.PROVIDERS["zingmp3"], lambda *args: {"items": [{"id": "z"}]})
+    monkeypatch.setattr(module.PROVIDERS["nhaccuatui"], lambda *args: {"items": [{"id": "n"}]})
+
+    assert module.search("test", source="zingmp3", wireguard=True)["items"]
+    assert module.search("test", source="nhaccuatui", wireguard=True)["items"]
+    assert calls == []
