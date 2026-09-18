@@ -23,7 +23,11 @@ export default function Settings({onClose}) {
   const [saving,setSaving]=useState(false);
   const [testing,setTesting]=useState(false);
   const [message,setMessage]=useState('');
-  useEffect(()=>{api('/api/settings/connections').then(d=>setItems(d.items||{})).catch(e=>setMessage(e.message));},[]);
+  const [wireguard,setWireguard]=useState(null);
+  useEffect(()=>{
+    api('/api/settings/connections').then(d=>setItems(d.items||{})).catch(e=>setMessage(e.message));
+    api('/api/settings/wireguard').then(setWireguard).catch(e=>setWireguard({status:'unavailable',detail:e.message}));
+  },[]);
   const p=PROVIDERS.find(x=>x.id===selected);
   const item=items[selected]||{provider:selected,enabled:true,configured:false,config:{}};
   const config={...(item.config||{})};
@@ -32,6 +36,22 @@ export default function Settings({onClose}) {
   const test=async()=>{setTesting(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected+'/test',{method:'POST'});setMessage(d.ok?'Connection test successful':(d.error||'Connection test failed'));setItems(x=>({...x,[selected]:{...x[selected],status:d.status,error:d.error||''}}));}catch(e){setMessage(e.message)}finally{setTesting(false)}};
   return <div className="glass mt-4 rounded-2xl p-5">
     <div className="flex items-center justify-between border-b border-white/10 pb-4"><div><h2 className="text-lg font-semibold">Provider Connections</h2><p className="text-xs text-zinc-500">Settings are stored in the application database and applied at runtime.</p></div><button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-2 text-sm">Close</button></div>
+    <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h3 className="font-medium">WireGuard</h3><p className="text-xs text-zinc-500">Live routing status and mounted configuration.</p></div>
+        <span className="rounded-lg border border-white/10 px-3 py-1.5 text-xs">{wireguard?.status||'loading'}</span>
+      </div>
+      <div className="mt-3 grid gap-2 text-xs text-zinc-400 md:grid-cols-3">
+        <div>Interface: <span className="text-zinc-200">{wireguard?.interface||'wg0'}</span></div>
+        <div>Config: <span className={wireguard?.config_exists?'text-emerald-300':'text-red-300'}>{wireguard?.config_exists?'found':'missing'}</span></div>
+        <div>Route: <span className="text-zinc-200">{wireguard?.route_active?'active':'inactive'}</span></div>
+        <div>Handshake: <span className="text-zinc-200">{wireguard?.handshake_recent?'recent':'not recent'}</span></div>
+        <div>Public IP: <span className="text-zinc-200">{wireguard?.public_ip||'—'}</span></div>
+        <div className="md:col-span-3">Config path: <span className="text-zinc-200">{wireguard?.config_path||'/etc/wireguard/wg0.conf'}</span></div>
+      </div>
+      {!wireguard?.config_exists&&<div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-200">WireGuard config is not mounted. Create <code>wireguard/wg0.conf</code> from the example and restart the worker.</div>}
+      {wireguard?.detail&&<div className="mt-2 text-xs text-red-300">{wireguard.detail}</div>}
+    </div>
     <div className="mt-5 grid gap-5 md:grid-cols-[220px_1fr]">
       <div className="space-y-1">{PROVIDERS.map(x=><button key={x.id} onClick={()=>{setSelected(x.id);setMessage('')}} className={'w-full rounded-lg px-3 py-2 text-left text-sm '+(selected===x.id?'bg-violet-600/20 text-violet-200':'text-zinc-400 hover:bg-white/5')}>{x.name}<span className="float-right text-xs">{items[x.id]?.configured?'●':'○'}</span></button>)}</div>
       <div>
