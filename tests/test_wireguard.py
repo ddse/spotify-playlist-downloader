@@ -109,7 +109,10 @@ class WireGuardManagerTests(unittest.TestCase):
             active, routes = self.wireguard._route_status()
 
         self.assertTrue(active)
-        self.assertEqual(len(routes), 3)
+        self.assertEqual(routes, [
+            "default via 172.18.0.1 dev eth0",
+            "default dev wg0 table 51820 proto static",
+        ])
         run.assert_called_once_with(
             ["ip", "-4", "route", "show", "table", "all"],
             check=True,
@@ -132,7 +135,7 @@ class WireGuardManagerTests(unittest.TestCase):
             active, routes = self.wireguard._route_status()
 
         self.assertFalse(active)
-        self.assertEqual(len(routes), 2)
+        self.assertEqual(routes, ["default via 172.18.0.1 dev eth0"])
 
     def test_route_status_handles_ip_command_failure(self):
         with patch.object(
