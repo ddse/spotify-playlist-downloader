@@ -8,7 +8,17 @@ from fastapi.staticfiles import StaticFiles
 from spotify import authorize_url, exchange, access_token, public_search, playlist_items, playlist_info
 from youtube import search as youtube_search
 
-DB_PATH=os.getenv('DB_PATH','/state/app.db'); SYNC_TOKEN=os.getenv('SYNC_TOKEN',''); WIREGUARD_DEFAULT=os.getenv('WIREGUARD_DEFAULT','0') in {'1','true','yes','on'}
+DB_PATH=os.getenv('DB_PATH','/state/app.db'); SYNC_TOKEN=os.getenv('SYNC_TOKEN','')
+WIREGUARD_ENV_DEFAULT=os.getenv('WIREGUARD_DEFAULT','0') in {'1','true','yes','on'}
+
+def wireguard_enabled():
+    c=db(); row=c.execute("SELECT value FROM app_settings WHERE key='wireguard_enabled'").fetchone()
+    if row is None:
+        value=1 if WIREGUARD_ENV_DEFAULT else 0
+        c.execute("INSERT OR IGNORE INTO app_settings(key,value) VALUES('wireguard_enabled',?)",(str(value),)); c.commit()
+    else:
+        value=row['value'] == '1'
+    c.close(); return value
 app=FastAPI(title='Music Downloader v3'); templates=Jinja2Templates(directory='templates')
 app.mount('/assets', StaticFiles(directory='static/assets'), name='assets')
 
@@ -38,18 +48,17 @@ async def api_health():
 
 @app.get('/api/services')
 def services():
-    c=db(); result={k:worker_state(c,k) for k in ('worker','worker-vpn','scheduler')}; result['wireguard']={'enabled':WIREGUARD_DEFAULT}; c.close(); return result
+    c=db(); result={k:worker_state(c,k) for k in ('worker','worker-vpn','scheduler')}; result['wireguard']={'enabled':wireguard_enabled()}; c.close(); return result
 
 @app.get('/api/settings/wireguard')
 def get_wireguard_setting():
-    return {'enabled': WIREGUARD_DEFAULT}
+    return {'enabled': wireguard_enabled()}
 
 @app.post('/api/settings/wireguard')
 def set_wireguard_setting(enabled: bool = Form(False)):
     # This is the default for newly queued jobs/searches. Existing jobs keep their route.
-    global WIREGUARD_DEFAULT
-    WIREGUARD_DEFAULT = bool(enabled)
-    return {'ok': True, 'enabled': WIREGUARD_DEFAULT}
+    c=db(); value='1' if enabled else '0'; c.execute("INSERT INTO app_settings(key,value) VALUES('wireguard_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(value,)); c.commit(); c.close()
+    return {'ok': True, 'enabled': bool(enabled)}
 
 @app.get('/api/spotify/login')
 def spotify_login(): return RedirectResponse(authorize_url())
@@ -104,7 +113,7 @@ async def search_spotify(q:str=''):
 @app.get('/api/search/youtube')
 async def search_youtube(q:str='',page:int=1,limit:int=10,wireguard:bool=None):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    use_vpn = WIREGUARD_DEFAULT if wireguard is None else bool(wireguard)
+    use_vpn = wireguard_enabled() if wireguard is None else bool(wireguard)
     try:return await youtube_search(q,page=page,limit=limit,wireguard=use_vpn)
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
@@ -141,7 +150,7 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
     subs = 1 if str(subtitle).lower() in {'1','true','on','yes'} else 0
     chapters = 1 if str(split_chapters).lower() in {'1','true','on','yes'} else 0
     start = 1 if str(auto_start).lower() in {'1','true','on','yes'} else 0
-    use_wireguard = 1 if str(wireguard).lower() in {'1','true','on','yes'} else int(WIREGUARD_DEFAULT)
+    use_wireguard = 1 if str(wireguard).lower() in {'1','true','on','yes'} else int(wireguard_enabled())
     key=('yt:'+youtube_id if youtube_id else 'url:'+secrets.token_hex(12))+':'+download_type+':'+download_format+':'+download_quality+':'+video_codec+':'+folder+':'+str(item_limit)
     c=db()
     # Use named parameters here so adding/removing a column cannot silently
