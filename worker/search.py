@@ -118,7 +118,7 @@ def search_nhaccuatui(query: str, page: int, limit: int):
             'has_more': len(items) > start + limit or len(items) == page * limit}
 
 
-def search(query: str, page: int = 1, limit: int = PAGE_SIZE):
+def search(query: str, page: int = 1, limit: int = PAGE_SIZE, source: str = "youtube"):
     query = query.strip()
     page = max(1, int(page))
     limit = max(1, min(int(limit), PAGE_SIZE))
@@ -202,7 +202,7 @@ class Handler(BaseHTTPRequestHandler):
         limit = params.get("limit", [str(PAGE_SIZE)])[0]
 
         try:
-            result = search(query, int(page), int(limit))
+            result = search(query, int(page), int(limit), source=source)
             self._json(200, result)
         except Exception as exc:
             self._json(500, {
