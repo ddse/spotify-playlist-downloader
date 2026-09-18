@@ -1,4 +1,6 @@
-name: CI/CD
+name: CI
+
+# Feature branch conflict resolution validation/CD
 
 on:
   pull_request:
