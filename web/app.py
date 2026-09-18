@@ -87,9 +87,9 @@ async def search_spotify(q:str=''):
     return {'items':[{'id':t['id'],'title':t['name'],'artists':', '.join(a['name'] for a in t['artists']),'album':t['album']['name'],'url':t['external_urls']['spotify'],'image':t['album']['images'][-1]['url'] if t['album']['images'] else ''} for t in result.get('tracks',{}).get('items',[])]}
 
 @app.get('/api/search/youtube')
-def search_youtube(q:str='',page:int=1,limit:int=10):
+async def search_youtube(q:str='',page:int=1,limit:int=10):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return youtube_search(q,page=page,limit=limit)
+    try:return await youtube_search(q,page=page,limit=limit)
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.post('/api/download')
