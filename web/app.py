@@ -123,7 +123,21 @@ async def wireguard_settings():
                 f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard"
             )
             response.raise_for_status()
-            result.update(response.json())
+            wg = response.json()
+            result.update({
+                'enabled': bool(wg.get('enabled')),
+                'interface': wg.get('interface', 'wg0'),
+                'config_path': wg.get('config_path', os.getenv('WG_CONFIG', '/etc/wireguard/wg0.conf')),
+                'config_exists': bool(wg.get('config_exists')),
+                'status': 'connected' if wg.get('vpn_route') else ('routing' if wg.get('enabled') else 'disconnected'),
+                'vpn_route': bool(wg.get('vpn_route')),
+                'route_active': bool(wg.get('route_active')),
+                'handshake_recent': bool(wg.get('handshake_recent')),
+                'public_ip': wg.get('public_ip', ''),
+                'receive_bytes': int(wg.get('receive_bytes', 0)),
+                'send_bytes': int(wg.get('send_bytes', 0)),
+                'peer_count': int(wg.get('peer_count', 0)),
+            })
             result['enabled'] = wireguard_enabled()
     except Exception as e:
         result['detail'] = str(e)
