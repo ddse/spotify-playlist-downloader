@@ -55,7 +55,7 @@ class DatabaseMigrationTests(unittest.TestCase):
 
 class WireGuardManagerTests(unittest.TestCase):
     def setUp(self):
-        import wireguard
+        from worker import wireguard
         self.wireguard = wireguard
         self.tmp = tempfile.TemporaryDirectory()
         self.config = Path(self.tmp.name) / "wg0.conf"
