@@ -6,7 +6,7 @@ import threading
 from search import serve as serve_search_api
 from yt_dlp.utils import DownloadError
 
-from wireguard import manager
+import wireguard as manager
 
 DB_PATH = os.getenv('DB_PATH', '/state/app.db')
 MUSIC_DIR = os.getenv('MUSIC_DIR', '/music')
