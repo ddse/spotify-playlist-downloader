@@ -24,6 +24,26 @@ app=FastAPI(title='Music Downloader v3'); templates=Jinja2Templates(directory='t
 app.mount('/assets', StaticFiles(directory='static/assets'), name='assets')
 
 
+def detect_source_type(url):
+    """Classify the source URL for the worker and history UI."""
+    try:
+        host = (urlparse(url).hostname or '').lower()
+    except Exception:
+        host = ''
+    if host == 'spotify.com' or host.endswith('.spotify.com'):
+        return 'spotify'
+    if host == 'youtube.com' or host.endswith('.youtube.com') or host == 'youtu.be':
+        return 'youtube'
+    if host == 'zingmp3.vn' or host.endswith('.zingmp3.vn'):
+        return 'zingmp3'
+    if host == 'nhaccuatui.com' or host.endswith('.nhaccuatui.com'):
+        return 'nhaccuatui'
+    if host == 'soundcloud.com' or host.endswith('.soundcloud.com'):
+        return 'soundcloud'
+    if host == 'tiktok.com' or host.endswith('.tiktok.com'):
+        return 'tiktok'
+    return 'url'
+
 def pid(url):
     m=re.search(r'playlist/([A-Za-z0-9]+)',url); return m.group(1) if m else url.rstrip('/').split('/')[-1].split('?')[0]
 
