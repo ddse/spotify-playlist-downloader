@@ -75,23 +75,57 @@ def search_youtube(q:str='',page:int=1,limit:int=10):
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.post('/api/download')
-def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto')):
-    download_type = download_type if download_type in ('audio', 'video') else 'audio'
+def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1')):
+    download_type = download_type if download_type in ('audio', 'video', 'captions', 'thumbnail') else 'audio'
     audio_formats = {'m4a','mp3','opus','wav','flac'}
     video_formats = {'any','mp4','ios'}
     audio_quality = {'0','128','192','256','320','best'}
     video_quality = {'best','2160','1440','1080','720','480','360'}
     codecs = {'auto','h264','h265','av1','vp9'}
+    download_format = download_format.lower()
     if download_type == 'audio':
         download_format = download_format if download_format in audio_formats else 'mp3'
         download_quality = download_quality if download_quality in audio_quality else '320'
         video_codec = 'auto'
-    else:
+    elif download_type == 'video':
         download_format = download_format if download_format in video_formats else 'any'
         download_quality = download_quality if download_quality in video_quality else 'best'
         video_codec = video_codec if video_codec in codecs else 'auto'
-    key=('yt:'+youtube_id if youtube_id else 'url:'+secrets.token_hex(12))+':'+download_type+':'+download_format+':'+download_quality+':'+video_codec
-    c=db(); c.execute('''INSERT INTO tracks(spotify_id,title,artists,album,spotify_url,status,progress,error,source_type,source_url,download_type,download_format,download_quality,video_codec) VALUES(?,?,?,?,?,'queued',0,NULL,?,?, ?,?,?,?) ON CONFLICT(spotify_id) DO UPDATE SET title=excluded.title,artists=excluded.artists,album=excluded.album,source_type=excluded.source_type,source_url=excluded.source_url,download_type=excluded.download_type,download_format=excluded.download_format,download_quality=excluded.download_quality,video_codec=excluded.video_codec,status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,error=NULL,updated_at=CURRENT_TIMESTAMP''',(key,title,artists,album,source_url,download_type,source_url,download_type,download_format,download_quality,video_codec)); c.commit(); c.close(); return RedirectResponse('/',303)
+    else:
+        download_format, download_quality, video_codec = 'any', 'best', 'auto'
+    try:
+        folder = os.path.normpath(download_folder.strip()) if download_folder.strip() else ''
+        if folder in ('.','/','..') or folder.startswith('../') or folder.startswith('..\\') or folder.startswith('/') or folder.startswith('\\'):
+            folder = ''
+        item_limit = max(0, min(int(playlist_item_limit or 0), 5000))
+    except ValueError:
+        folder, item_limit = '', 0
+    subtitle_lang = re.sub(r'[^A-Za-z0-9,._-]', '', subtitle_lang)[:100] or 'ja,en'
+    subtitle_mode = subtitle_mode if subtitle_mode in {'auto_only','manual_only','prefer_manual','prefer_auto'} else 'prefer_manual'
+    thumb = 1 if str(thumbnail).lower() in {'1','true','on','yes'} else 0
+    subs = 1 if str(subtitle).lower() in {'1','true','on','yes'} else 0
+    chapters = 1 if str(split_chapters).lower() in {'1','true','on','yes'} else 0
+    start = 1 if str(auto_start).lower() in {'1','true','on','yes'} else 0
+    key=('yt:'+youtube_id if youtube_id else 'url:'+secrets.token_hex(12))+':'+download_type+':'+download_format+':'+download_quality+':'+video_codec+':'+folder+':'+str(item_limit)
+    c=db()
+    c.execute('''INSERT INTO tracks(spotify_id,title,artists,album,spotify_url,status,progress,error,source_type,source_url,download_type,download_format,download_quality,video_codec,download_folder,thumbnail,subtitle,subtitle_lang,subtitle_mode,playlist_item_limit,split_chapters,auto_start,priority)
+      VALUES(?,?,?,?,?,'queued',0,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+      ON CONFLICT(spotify_id) DO UPDATE SET title=excluded.title,artists=excluded.artists,album=excluded.album,source_type=excluded.source_type,source_url=excluded.source_url,download_type=excluded.download_type,download_format=excluded.download_format,download_quality=excluded.download_quality,video_codec=excluded.video_codec,download_folder=excluded.download_folder,thumbnail=excluded.thumbnail,subtitle=excluded.subtitle,subtitle_lang=excluded.subtitle_lang,subtitle_mode=excluded.subtitle_mode,playlist_item_limit=excluded.playlist_item_limit,split_chapters=excluded.split_chapters,auto_start=excluded.auto_start,status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,error=NULL,updated_at=CURRENT_TIMESTAMP''',
+      (key,title,artists,album,source_url,download_type,source_url,download_type,download_format,download_quality,video_codec,folder,thumb,subs,subtitle_lang,subtitle_mode,item_limit,chapters,start))
+    c.commit(); c.close()
+    return RedirectResponse('/',303)
+
+@app.post('/api/queue/{track_id}/start')
+def start_queue(track_id:str):
+    c=db(); c.execute("UPDATE tracks SET auto_start=1,status=CASE WHEN status IN ('paused','queued') THEN 'queued' ELSE status END,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status IN ('paused','queued')",(track_id,)); c.commit(); c.close(); return {'ok':True}
+
+@app.post('/api/queue/{track_id}/pause')
+def pause_queue(track_id:str):
+    c=db(); cur=c.execute("UPDATE tracks SET auto_start=0,status='paused',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status='queued'",(track_id,)); c.commit(); c.close(); return {'ok':cur.rowcount>0}
+
+@app.post('/api/queue/prioritize/{track_id}')
+def prioritize_queue(track_id:str):
+    c=db(); c.execute("UPDATE tracks SET priority=priority+1,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status IN ('queued','paused')",(track_id,)); c.commit(); c.close(); return {'ok':True}
 
 @app.post('/api/retry/{track_id}')
 def retry(track_id:str):
@@ -142,11 +176,11 @@ def playlists():
 
 @app.get('/api/jobs')
 def jobs():
-    c=db(); rows=c.execute("SELECT spotify_id,title,artists,album,status,progress,error,source_type,source_url,download_type,download_format,download_quality,video_codec,updated_at,created_at FROM tracks ORDER BY CASE status WHEN 'downloading' THEN 0 WHEN 'queued' THEN 1 WHEN 'pending_source' THEN 2 WHEN 'failed' THEN 3 ELSE 4 END,updated_at DESC LIMIT 100").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
+    c=db(); rows=c.execute("SELECT * FROM tracks ORDER BY CASE status WHEN 'downloading' THEN 0 WHEN 'queued' THEN 1 WHEN 'pending_source' THEN 2 WHEN 'failed' THEN 3 ELSE 4 END,updated_at DESC LIMIT 100").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
 
 @app.get('/api/history')
 def history():
-    c=db(); rows=c.execute("SELECT spotify_id,title,artists,album,status,progress,error,source_type,source_url,download_type,download_format,download_quality,video_codec,updated_at,created_at FROM tracks WHERE status IN ('completed','failed') ORDER BY updated_at DESC LIMIT 200").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
+    c=db(); rows=c.execute("SELECT * FROM tracks WHERE status IN ('completed','failed') ORDER BY updated_at DESC LIMIT 200").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
 
 @app.get('/metube')
 def metube_redirect(): return RedirectResponse(METUBE_PUBLIC_URL)
