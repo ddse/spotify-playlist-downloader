@@ -45,6 +45,70 @@ async def health(): return {'ok':True}
 async def api_health():
     c=db(); w=worker_state(c,'worker'); s=worker_state(c,'scheduler'); c.close(); return {'ok':True,'spotify_connected':bool(await access_token()),'worker':w,'scheduler':s,'wireguard':wireguard_enabled()}
 
+PROVIDER_DEFAULTS = {
+    'spotify': {'client_id':'', 'client_secret':'', 'redirect_uri':'http://localhost:8088/api/spotify/callback'},
+    'youtube': {'cookies':'', 'proxy':''},
+    'soundcloud': {'cookies':'', 'proxy':''},
+    'tiktok': {'cookies':'', 'proxy':''},
+    'apple_music': {'developer_token':''},
+    'zingmp3': {},
+    'nhaccuatui': {},
+}
+
+def provider_row(c, provider):
+    row=c.execute('SELECT * FROM provider_connections WHERE provider=?',(provider,)).fetchone()
+    if not row:
+        cfg=PROVIDER_DEFAULTS.get(provider,{})
+        return {'provider':provider,'enabled':True,'config':cfg,'configured':False,'status':'not_configured','error':'','last_tested_at':None}
+    try: cfg=json.loads(row['config_json'] or '{}')
+    except Exception: cfg={}
+    configured=any(bool(v) for v in cfg.values())
+    safe=dict(cfg)
+    for key in ('client_secret','developer_token'):
+        if safe.get(key): safe[key]='********'
+    if cfg.get('cookies'): safe['cookies']='********'
+    return {'provider':provider,'enabled':bool(row['enabled']),'config':safe,'configured':configured,'status':row['status'] or 'not_configured','error':row['error'] or '','last_tested_at':row['last_tested_at']}
+
+@app.get('/api/settings/connections')
+def provider_connections():
+    c=db(); items={p:provider_row(c,p) for p in PROVIDER_DEFAULTS}; c.close(); return {'items':items}
+
+@app.put('/api/settings/connections/{provider}')
+async def update_provider_connection(provider:str, request:Request):
+    if provider not in PROVIDER_DEFAULTS: raise HTTPException(404,'unknown provider')
+    body=await request.json(); cfg=body.get('config') or {}; enabled=1 if body.get('enabled',True) else 0
+    c=db(); existing=c.execute('SELECT config_json FROM provider_connections WHERE provider=?',(provider,)).fetchone()
+    old=json.loads(existing['config_json']) if existing and existing['config_json'] else {}
+    for k,v in list(cfg.items()):
+        if v=='********': cfg[k]=old.get(k,'')
+    c.execute('INSERT INTO provider_connections(provider,enabled,config_json,status,error,updated_at) VALUES(?,?,?,CASE WHEN ? THEN \'configured\' ELSE \'disabled\' END,\'\',CURRENT_TIMESTAMP) ON CONFLICT(provider) DO UPDATE SET enabled=excluded.enabled,config_json=excluded.config_json,status=excluded.status,error=\'\',updated_at=CURRENT_TIMESTAMP',(provider,enabled,json.dumps(cfg),enabled))
+    c.commit(); result=provider_row(c,provider); c.close(); return result
+
+@app.post('/api/settings/connections/{provider}/test')
+async def test_provider_connection(provider:str):
+    if provider not in PROVIDER_DEFAULTS: raise HTTPException(404,'unknown provider')
+    c=db(); row=c.execute('SELECT enabled,config_json FROM provider_connections WHERE provider=?',(provider,)).fetchone()
+    cfg=json.loads(row['config_json']) if row and row['config_json'] else PROVIDER_DEFAULTS[provider]
+    if not row or not row['enabled']:
+        c.close(); return {'ok':False,'status':'disabled','error':'Provider is disabled'}
+    ok=True; error=''
+    try:
+        if provider=='spotify':
+            from spotify import spotify_credentials
+            cid,secret,redirect=spotify_credentials()
+            if not cid: raise ValueError('Client ID is required')
+            if not redirect: raise ValueError('Redirect URI is required')
+            if secret:
+                async with httpx.AsyncClient(timeout=15) as x:
+                    r=await x.post('https://accounts.spotify.com/api/token',data={'grant_type':'client_credentials'},headers={'Authorization':'Basic '+__import__('base64').b64encode(f'{cid}:{secret}'.encode()).decode()})
+                    if r.status_code>=400: raise RuntimeError(f'Spotify token test failed: HTTP {r.status_code}')
+        elif provider=='apple_music':
+            if not cfg.get('developer_token'): raise ValueError('Developer Token is required')
+    except Exception as e:
+        ok=False; error=str(e)
+    c.execute('UPDATE provider_connections SET status=?,error=?,last_tested_at=CURRENT_TIMESTAMP WHERE provider=?',('connected' if ok else 'error',error,provider)); c.commit(); c.close()
+    return {'ok':ok,'status':'connected' if ok else 'error','error':error}
+
 @app.get('/api/services')
 async def services():
     c=db(); result={k:worker_state(c,k) for k in ('worker','scheduler')}; c.close()
