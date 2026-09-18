@@ -85,6 +85,43 @@ def search(query, page=1, limit=10):
         f"&num={limit}&query={quote(query, safe='')}"
     )
     try:
-        return _normalize(_request_json(legacy), limit, page)
+        result = _normalize(_request_json(legacy), limit, page)
+        if result["items"]:
+            return result
+    except Exception:
+        pass
+
+    html_url = (
+        "https://zingmp3.vn/tim-kiem/bai-hat?q="
+        f"{quote(query, safe='')}"
+    )
+    try:
+        req = urllib.request.Request(html_url, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://zingmp3.vn/",
+            "Accept": "text/html,application/xhtml+xml",
+        })
+        with urllib.request.urlopen(req, timeout=20) as r:
+            html = r.read().decode("utf-8", "ignore")
+        import re
+        pattern = re.compile(
+            r'href=["\']([^"\']*?/bai-hat/[^"\']+?\.html)["\'][^>]*>(.*?)</a>',
+            re.I | re.S,
+        )
+        raw = []
+        for link, body in pattern.findall(html):
+            title = re.sub(r"<[^>]+>", " ", body)
+            title = re.sub(r"\s+", " ", title).strip()
+            if title:
+                raw.append({
+                    "id": link.rstrip("/").rsplit("/", 1)[-1].removesuffix(".html"),
+                    "title": title,
+                    "channel": "",
+                    "duration": None,
+                    "url": link if link.startswith("http") else "https://zingmp3.vn"+link,
+                    "thumbnail": "",
+                    "source": "zingmp3",
+                })
+        return _normalize({"items": raw}, limit, page)
     except Exception:
         return {"items": [], "page": page, "limit": limit, "has_more": False}
