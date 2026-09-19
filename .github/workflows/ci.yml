@@ -51,6 +51,12 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Provider pytest suite
         run: python -m pytest -q
+      - name: Zing MP3 live integration - search
+        run: python scripts/test_zing_search.py
+
+      - name: Zing MP3 live integration - download
+        run: python scripts/test_zing_download.py
+
 
       - name: Frontend build
         working-directory: web
