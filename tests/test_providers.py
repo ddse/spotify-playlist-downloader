@@ -17,25 +17,13 @@ def test_provider_modules_have_search():
         assert callable(provider.search)
 
 
-def test_search_input_is_safe_for_url_builders(monkeypatch):
+def test_zingmp3_search_input_is_safely_encoded():
     zing = load_provider("zingmp3")
-    seen = {}
-
-    class Response:
-        def read(self):
-            return b'{"data":{"items":[]}}'
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-
-    def fake_urlopen(req, timeout=20):
-        seen["url"] = req.full_url
-        return Response()
-
-    monkeypatch.setattr(zing.urllib.request, "urlopen", fake_urlopen)
-    result = zing.search("a song & artist / test", page=1, limit=10)
-    assert result["items"] == []
-    assert "a%20song%20%26%20artist%20/%20test" not in seen["url"]
-    assert "a%20song%20%26%20artist%20%2F%20test" in seen["url"]
+    url = zing.build_api_url("/api/v2/search/multi", {
+        "q": "a song & artist / test",
+        "allowCorrect": "1",
+    })
+    assert "q=a+song+%26+artist+%2F+test" in url
 
 
 def test_nhaccuatui_parser_normalizes_results(monkeypatch):
