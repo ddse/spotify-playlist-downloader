@@ -37,8 +37,16 @@ def test_real_provider_search_runs_through_wireguard():
         assert status["vpn_route"], status
         assert status["public_ip"], status
 
+        youtube = load_provider("youtube")
         zing = load_provider("zingmp3")
         nct = load_provider("nhaccuatui")
+
+        youtube_result = youtube.search("Đừng Làm Trái Tim Anh Đau", page=1, limit=5)
+        assert youtube_result["items"], "YouTube returned no real results over WireGuard"
+        assert all(
+            item["url"].startswith("https://www.youtube.com/")
+            for item in youtube_result["items"]
+        )
 
         zing_result = zing.search("Đừng Làm Trái Tim Anh Đau", page=1, limit=5)
         assert zing_result["items"], "Zing MP3 returned no real results over WireGuard"
