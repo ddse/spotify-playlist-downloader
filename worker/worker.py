@@ -7,11 +7,20 @@ from search import serve as serve_search_api
 from yt_dlp.utils import DownloadError
 
 import wireguard as manager
+from providers.zingmp3 import get_stream_url as zing_get_stream_url
 
 import re
 import urllib.request
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
+
+def is_zingmp3(url):
+    try:
+        host = (urlparse(url).hostname or '').lower()
+        return host == 'zingmp3.vn' or host.endswith('.zingmp3.vn')
+    except Exception:
+        return False
+
 
 def is_nhaccuatui(url):
     try:
@@ -123,10 +132,59 @@ def download_nhaccuatui(row, c, track_id):
                 heartbeat(c, 'downloading:' + track_id)
                 last_update = now
 
+def download_zingmp3(row, c, track_id):
+    Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
+    artist = (row['artists'] or 'Zing MP3').replace('/', '_')
+    album = (row['album'] or 'Zing MP3').replace('/', '_')
+    title = (row['title'] or 'Unknown Title').replace('/', '_')
+    custom_folder = (row['download_folder'] or '').strip()
+    folder = Path(MUSIC_DIR) / custom_folder if custom_folder else Path(MUSIC_DIR) / artist / album
+    folder.mkdir(parents=True, exist_ok=True)
+    output = folder / f'{title}.mp3'
+
+    stream_url = zing_get_stream_url(row['source_url'])
+    req = urllib.request.Request(stream_url, headers={
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://zingmp3.vn/',
+    })
+    with urllib.request.urlopen(req, timeout=60) as response, open(output, 'wb') as fp:
+        total = int(response.headers.get('Content-Length') or 0)
+        downloaded = 0
+        last_update = 0.0
+        while True:
+            chunk = response.read(1024 * 256)
+            if not chunk:
+                break
+            fp.write(chunk)
+            downloaded += len(chunk)
+            now = time.time()
+            if now - last_update >= 1:
+                percent = int(downloaded * 100 / total) if total else 1
+                c.execute(
+                    'UPDATE tracks SET progress=?,downloaded_bytes=?,total_bytes=?,download_speed=?,eta=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
+                    (max(1, min(99, percent)), downloaded, format_speed(
+                        downloaded / max(now - last_update, 1)
+                    ), '', track_id),
+                )
+                c.commit()
+                heartbeat(c, 'downloading:' + track_id)
+                last_update = now
+
+    if downloaded < 10240:
+        raise RuntimeError('Zing MP3 download is unexpectedly small')
+    with open(output, 'rb') as fp:
+        header = fp.read(12)
+    if not (header.startswith(b'ID3') or header[:2] in (b'\xff\xfb', b'\xff\xf3', b'\xff\xf2')):
+        raise RuntimeError('Zing MP3 download does not look like MP3 audio')
+
+
 def download(row, c, track_id):
     Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
     url = row['source_url']
     source_mode = row['source_mode'] or 'single'
+    if is_zingmp3(url):
+        download_zingmp3(row, c, track_id)
+        return
     if is_nhaccuatui(url):
         download_nhaccuatui(row, c, track_id)
         return
