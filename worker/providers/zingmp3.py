@@ -105,10 +105,7 @@ def _collect_song_records(value, out):
         # Search returns albums alongside songs. Only /bai-hat/ records are
         # download candidates; album records must not become fake songs.
         is_song = "/bai-hat/" in link or (
-            value.get("encodeId") and (
-                value.get("duration") is not None or
-                value.get("artists") is not None
-            )
+            not link and value.get("encodeId") and value.get("duration") is not None
         )
         if sid and title and is_song:
             out.append({
