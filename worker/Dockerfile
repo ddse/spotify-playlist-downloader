@@ -4,7 +4,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl unzip \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://deno.land/install.sh | sh
-RUN pip install --no-cache-dir --target /opt/python-packages "yt-dlp[default]"
+RUN pip install --no-cache-dir --target /opt/python-packages "yt-dlp[default]" requests==2.32.5
 FROM python:3.13-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates ffmpeg wireguard-tools iproute2 procps kmod iptables \
