@@ -63,7 +63,22 @@ def _normalize(data, limit, page):
 
 
 def _search_html(query, page, limit):
-    url = f"https://zingmp3.vn/tim-kiem/bai-hat?q={quote(query, safe='')}"
+    urls = [
+        f"https://zingmp3.vn/tim-kiem/bai-hat?q={quote(query, safe='')}",
+        f"https://zingmp3.vn/tim-kiem/tat-ca?q={quote(query, safe='')}",
+    ]
+    last_error = None
+    for url in urls:
+        try:
+            return _search_html_url(url, page, limit)
+        except Exception as exc:
+            last_error = exc
+    if last_error:
+        raise last_error
+    return {"items": [], "page": page, "limit": limit, "has_more": False}
+
+
+def _search_html_url(url, page, limit):
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0",
         "Referer": "https://zingmp3.vn/",
