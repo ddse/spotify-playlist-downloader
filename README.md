@@ -126,3 +126,23 @@ docker compose ps
 The real `wireguard/wg0.conf` is ignored by Git. The worker needs `NET_ADMIN` (and `SYS_MODULE` when the host kernel module must be loaded) to manage the WireGuard interface.
 
 When the setting is changed while a download is running, the toggle waits for that download to finish before changing the route, preventing a route switch in the middle of a download.
+
+### Real PC WireGuard integration test
+
+Để kiểm tra thực tế trên PC với WireGuard thật, không mock provider:
+
+```bash
+export RUN_WIREGUARD_LIVE=1
+python -m pytest -q -m wireguard_live --timeout=30
+```
+
+Test sẽ:
+1. Kiểm tra `wg0.conf` tồn tại.
+2. Bật `wg0` bằng `worker.wireguard`.
+3. Kiểm tra interface, route, handshake và public IP.
+4. Search thật Zing MP3 qua tunnel.
+5. Search thật NhacCuaTui qua tunnel.
+6. Kiểm tra kết quả chứa URL thật của provider.
+7. Nếu WireGuard ban đầu OFF, tắt lại sau test.
+
+Test này không chạy trong CI thông thường vì cần quyền quản trị mạng, `wg-quick` và WireGuard peer thật trên máy chạy test.
