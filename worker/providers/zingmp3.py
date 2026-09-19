@@ -73,7 +73,7 @@ def search(query, page=1, limit=10):
     # production contract so real searches do not silently return empty data.
     url = (
         "https://ac.zingmp3.vn/v1/web/search?"
-        f"q={quote(query, safe='')}&type=audio&page={page}&num={limit}"
+        f"num={limit}&page={page}&query={quote(query, safe='')}"
     )
     try:
         data = _request_json(url)
@@ -81,7 +81,23 @@ def search(query, page=1, limit=10):
         if result["items"]:
             return result
     except Exception:
-        # The legacy autocomplete endpoint is still useful when the current
+        pass
+
+    # Newer web deployments may use q + type=audio. Try it after the
+    # long-standing query contract so either production variant is supported.
+    modern_url = (
+        "https://ac.zingmp3.vn/v1/web/search?"
+        f"q={quote(query, safe='')}&type=audio&page={page}&num={limit}"
+    )
+    try:
+        data = _request_json(modern_url)
+        result = _normalize(data, limit, page)
+        if result["items"]:
+            return result
+    except Exception:
+        pass
+
+    # The legacy autocomplete endpoint is still useful when the current
         # web-search endpoint changes response shape or is temporarily empty.
         pass
 
