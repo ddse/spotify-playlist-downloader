@@ -69,7 +69,12 @@ def search(query, page=1, limit=10):
     if not query:
         return {"items": [], "page": page, "limit": limit, "has_more": False}
 
-    url = f"https://ac.zingmp3.vn/v1/web/search?num={limit}&page={page}&query={quote(query, safe='')}"
+    # Current Zing web search API uses q + type=audio. Keep this exact
+    # production contract so real searches do not silently return empty data.
+    url = (
+        "https://ac.zingmp3.vn/v1/web/search?"
+        f"q={quote(query, safe='')}&type=audio&page={page}&num={limit}"
+    )
     try:
         data = _request_json(url)
         result = _normalize(data, limit, page)
@@ -105,13 +110,19 @@ def search(query, page=1, limit=10):
             html = r.read().decode("utf-8", "ignore")
         import re
         pattern = re.compile(
-            r'href=["\']([^"\']*?/bai-hat/[^"\']+?\.html)["\'][^>]*>(.*?)</a>',
+            r'<a\\b([^>]*?href=[\"\']([^\"\']*?/bai-hat/[^\"\']+?\\.html)[^>]*)>(.*?)</a>',
             re.I | re.S,
         )
         raw = []
-        for link, body in pattern.findall(html):
-            title = re.sub(r"<[^>]+>", " ", body)
-            title = re.sub(r"\s+", " ", title).strip()
+        for attrs, link, body in pattern.findall(html):
+            title_match = re.search(
+                r'(?:title|data-title|reltitle)=[\"\']([^\"\']+)[\"\']',
+                attrs,
+                re.I,
+            )
+            title = title_match.group(1) if title_match else body
+            title = re.sub(r"<[^>]+>", " ", title)
+            title = re.sub(r"\\s+", " ", title).strip()
             if title:
                 raw.append({
                     "id": link.rstrip("/").rsplit("/", 1)[-1].removesuffix(".html"),
