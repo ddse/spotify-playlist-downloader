@@ -110,7 +110,7 @@ def search(query, page=1, limit=10):
             html = r.read().decode("utf-8", "ignore")
         import re
         pattern = re.compile(
-            r'<a\\b([^>]*?href=[\"\']([^\"\']*?/bai-hat/[^\"\']+?\\.html)[^>]*)>(.*?)</a>',
+            r'<a\b([^>]*?href=[\"\']([^\"\']*?/bai-hat/[^\"\']+?\.html)[^>]*)>(.*?)</a>',
             re.I | re.S,
         )
         raw = []
@@ -122,7 +122,7 @@ def search(query, page=1, limit=10):
             )
             title = title_match.group(1) if title_match else body
             title = re.sub(r"<[^>]+>", " ", title)
-            title = re.sub(r"\\s+", " ", title).strip()
+            title = re.sub(r"\s+", " ", title).strip()
             if title:
                 raw.append({
                     "id": link.rstrip("/").rsplit("/", 1)[-1].removesuffix(".html"),
