@@ -24,17 +24,27 @@ def search(query,page=1,limit=10):
     with urllib.request.urlopen(req,timeout=20) as r:
         html=r.read().decode("utf-8","ignore")
 
+    # NCT has changed the search-result markup several times. The href can
+    # appear before/after title attributes, and current pages use both
+    # /bai-hat/ and /song/ links. Parse the complete anchor instead of
+    # assuming a fixed attribute order.
     pattern=re.compile(
-        r'href=["\'](https?://(?:www\.)?nhaccuatui\.com/(?:bai-hat|song)/[^"\']+)["\'][^>]*>(.*?)</a>',
+        r'<a\\b([^>]*?href=[\"\'](https?://(?:www\.)?nhaccuatui\.com/(?:bai-hat|song)/[^\"\']+)[^>]*)>(.*?)</a>',
         re.I|re.S
     )
     seen=set(); all_items=[]
-    for url,raw in pattern.findall(html):
+    for attrs,url,raw in pattern.findall(html):
         url=unescape(url)
         if url in seen: continue
         seen.add(url)
-        title=_clean_title(raw)
-        if title and len(title) > 1:
+
+        title_match=re.search(
+            r'(?:title|data-title|reltitle)=[\"\']([^\"\']+)[\"\']',
+            attrs,
+            re.I,
+        )
+        title=_clean_title(title_match.group(1) if title_match else raw)
+        if title and len(title)>1:
             all_items.append({
                 "id":url,
                 "title":title,
