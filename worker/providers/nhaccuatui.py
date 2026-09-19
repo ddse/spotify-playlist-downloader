@@ -29,9 +29,19 @@ def search(query,page=1,limit=10):
     # /bai-hat/ and /song/ links. Parse the complete anchor instead of
     # assuming a fixed attribute order.
     pattern=re.compile(
-        r'<a\b([^>]*?href=[\"\'](https?://(?:www\.)?nhaccuatui\.com/(?:bai-hat|song)/[^\"\']+)[^>]*)>(.*?)</a>',
+        r'<a\\b([^>]*?href=[\"\'](https?://(?:www\\.)?nhaccuatui\\.com/(?:bai-hat|song)/[^\"\']+)[^>]*)>(.*?)</a>',
         re.I|re.S
     )
+    matches=pattern.findall(html)
+    if not matches:
+        href_pattern=re.compile(
+            r'href=[\"\'](https?://(?:www\\.)?nhaccuatui\\.com/(?:bai-hat|song)/[^\"\']+)',
+            re.I
+        )
+        for m in href_pattern.finditer(html):
+            start=max(0,m.start()-1200); end=min(len(html),m.end()+1200)
+            nearby=html[start:end]
+            matches.append((nearby,m.group(1),nearby))
     seen=set(); all_items=[]
     for attrs,url,raw in pattern.findall(html):
         url=unescape(url)
