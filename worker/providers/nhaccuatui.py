@@ -29,7 +29,7 @@ def search(query,page=1,limit=10):
     # /bai-hat/ and /song/ links. Parse the complete anchor instead of
     # assuming a fixed attribute order.
     pattern=re.compile(
-        r'<a\\b([^>]*?href=[\"\'](https?://(?:www\.)?nhaccuatui\.com/(?:bai-hat|song)/[^\"\']+)[^>]*)>(.*?)</a>',
+        r'<a\b([^>]*?href=[\"\'](https?://(?:www\.)?nhaccuatui\.com/(?:bai-hat|song)/[^\"\']+)[^>]*)>(.*?)</a>',
         re.I|re.S
     )
     seen=set(); all_items=[]
