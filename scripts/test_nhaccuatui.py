@@ -10,6 +10,7 @@ This script validates both the NCT API contract used by nct.js and the
 application's NhacCuaTui search provider.
 """
 
+import gzip
 import json
 import re
 import urllib.request
@@ -39,7 +40,7 @@ def nct_request(path, params=None):
     request = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(request, timeout=30) as response:
         assert response.status == 200, f"NCT API HTTP {response.status}"
-        payload = json.loads(response.read().decode("utf-8"))
+        body = response.read()\n        if (response.headers.get("Content-Encoding") or "").lower() == "gzip":\n            body = gzip.decompress(body)\n        payload = json.loads(body.decode("utf-8"))
 
     assert payload.get("success") is not False, payload
     assert payload.get("code", 0) == 0, payload
