@@ -92,6 +92,23 @@ def _search_html(query, page, limit):
                 "thumbnail": "",
                 "source": "zingmp3",
             })
+    if not raw:
+        encoded = re.compile(
+            r'"(?:encodeId|encodeID)"\s*:\s*"([^"]+)"'
+            r'.{0,2500}?"title"\s*:\s*"([^"]+)"',
+            re.I | re.S,
+        )
+        for song_id, title in encoded.findall(html):
+            raw.append({
+                "id": song_id,
+                "title": title,
+                "channel": "",
+                "duration": None,
+                "url": f"https://zingmp3.vn/bai-hat/{quote(title, safe='')}/{song_id}.html",
+                "thumbnail": "",
+                "source": "zingmp3",
+            })
+
     return _normalize({"items": raw}, limit, page)
 
 
