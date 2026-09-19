@@ -1,12 +1,5 @@
 name: CI
 
-# Feature branch conflict resolution validation
-# provider schema syntax fixed
-# dependencies installed before test suites
-# provider path isolation fixed
-# provider API routes restored
-# database import restored/CD
-
 on:
   pull_request:
     branches: [main]
@@ -17,9 +10,6 @@ on:
 permissions:
   contents: read
 
-# Every push to main and every PR targeting main gets its own CI run.
-# Do not cancel an in-flight run when another commit is pushed: each commit
-# must be independently validated before it can be considered mergeable.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
@@ -28,6 +18,7 @@ jobs:
   validate:
     name: Full validation
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -41,30 +32,41 @@ jobs:
       - name: Install Python test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r web/requirements.txt pytest
+          pip install -r web/requirements.txt pytest pytest-timeout
           pip install "yt-dlp[default]"
 
       - name: Python syntax
         run: python -m compileall -q database.py web worker tests
 
       - name: Python automation tests
+        timeout-minutes: 5
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+
       - name: Provider pytest suite
-        run: python -m pytest -q
+        timeout-minutes: 5
+        run: python -m pytest -q -m "not live" --timeout=30
+
+      - name: Live provider integration tests
+        timeout-minutes: 5
+        run: python -m pytest -q -m live --timeout=30
 
       - name: Frontend build
         working-directory: web
+        timeout-minutes: 5
         run: |
           npm install
           npm run build
 
       - name: Docker Compose validation
+        timeout-minutes: 2
         run: docker compose config
 
       - name: Build all Docker services
+        timeout-minutes: 15
         run: docker compose build --pull
 
       - name: Integration smoke test
+        timeout-minutes: 5
         run: |
           docker compose up -d --wait
           curl --fail --retry 10 --retry-delay 2 http://127.0.0.1:8088/health

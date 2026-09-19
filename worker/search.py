@@ -19,6 +19,11 @@ def search(query: str, page: int = 1, limit: int = PAGE_SIZE, source: str = "you
     provider = PROVIDERS.get(source)
     if not provider:
         raise ValueError(f"unsupported search provider: {source}")
+
+    # The UI explicitly passes the current WireGuard setting. When omitted,
+    # fall back to the persisted worker setting. All search providers must
+    # use the same routing policy so enabling WireGuard consistently affects
+    # YouTube, Zing MP3, and NhacCuaTui.
     use_wireguard = manager.setting_enabled() if wireguard is None else bool(wireguard)
     return manager.run(use_wireguard, lambda: provider(query, page, limit))
 
