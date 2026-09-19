@@ -1,8 +1,12 @@
 import importlib.util
 import pathlib
 import json
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+WORKER = ROOT / "worker"
+if str(WORKER) not in sys.path:
+    sys.path.insert(0, str(WORKER))
 
 
 def load_provider(name):
