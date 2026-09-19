@@ -57,50 +57,79 @@ def test_nhaccuatui_parser_normalizes_results(monkeypatch):
     assert result["items"][0]["title"] == "Test Song"
 
 
-def test_zingmp3_parser_handles_nested_search_results(monkeypatch):
+
+def test_zingmp3_signed_search_filters_albums(monkeypatch):
     zing = load_provider("zingmp3")
-    payload = {
-        "data": {"items": [{"section": {"items": [{
-            "encodeId": "ZWTEST01",
-            "title": "Việt Nam Quê Hương Tôi",
-            "alias": "viet-nam-que-huong-toi",
-            "artists": [{"name": "Trọng Tấn"}],
-        }]}}]}
-    }
+    calls = []
 
     class Response:
-        def read(self): return __import__("json").dumps(payload).encode()
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
+        def raise_for_status(self): pass
+        def json(self):
+            return {
+                "err": 0,
+                "data": {
+                    "items": [
+                        {"encodeId": "SONG1", "title": "Song", "link": "/bai-hat/song/SONG1.html",
+                         "duration": 100, "artists": [{"name": "Artist"}]},
+                        {"encodeId": "ALBUM1", "title": "Song (Single)", "link": "/album/song-single/ALBUM1.html"},
+                    ]
+                },
+            }
 
-    monkeypatch.setattr(zing.urllib.request, "urlopen", lambda *a, **k: Response())
-    result = zing.search("Việt nam quê hương tôi")
-    assert result["items"][0]["id"] == "ZWTEST01"
-    assert result["items"][0]["title"] == "Việt Nam Quê Hương Tôi"
-    assert result["items"][0]["channel"] == "Trọng Tấn"
+    class Cookies:
+        def get(self, key, default=None):
+            return "test-rqid" if key == "zmp3_rqid" else default
+
+    class Session:
+        def __init__(self):
+            self.cookies = Cookies()
+            self.headers = {}
+        def get(self, url, timeout=30):
+            calls.append(url)
+            return Response()
+
+    monkeypatch.setattr(zing.requests, "Session", Session)
+    result = zing.search("Song")
+    assert [item["id"] for item in result["items"]] == ["SONG1"]
+    assert result["items"][0]["channel"] == "Artist"
+    assert any("/api/v2/search/multi" in url for url in calls)
+    assert "q=Song" in calls[-1]
+    assert "sig=" in calls[-1]
 
 
-def test_zingmp3_search_falls_back_to_legacy_endpoint(monkeypatch):
+def test_zingmp3_signature_is_stable():
     zing = load_provider("zingmp3")
-    urls = []
+    url = zing.build_api_url("/api/v2/search/multi", {"q": "Hoa Vo Sac", "allowCorrect": "1"})
+    assert "ctime=1" in url
+    assert "version=1.19.1" in url
+    assert "apiKey=" in url
+    assert "sig=" in url
+
+
+def test_zingmp3_streaming_prefers_128(monkeypatch):
+    zing = load_provider("zingmp3")
 
     class Response:
-        def __init__(self, payload): self.payload = payload
-        def read(self): return __import__("json").dumps(self.payload).encode()
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
+        def raise_for_status(self): pass
+        def json(self):
+            return {"err": 0, "data": {
+                "128": "https://cdn.example/128.mp3",
+                "320": "VIP",
+            }}
 
-    def fake_urlopen(req, timeout=20):
-        urls.append(req.full_url)
-        if "ac.zingmp3.vn/v1/web/search" in req.full_url:
-            return Response({"data": {"items": []}})
-        return Response({"items": [{"encodeId": "ZWTEST02", "title": "Việt Nam Quê Hương Tôi", "alias": "viet-nam-que-huong-toi", "artists": [{"name": "Thanh Thúy"}]}]})
+    class Cookies:
+        def get(self, key, default=None):
+            return "test-rqid" if key == "zmp3_rqid" else default
 
-    monkeypatch.setattr(zing.urllib.request, "urlopen", fake_urlopen)
-    result = zing.search("Việt nam quê hương tôi")
-    assert len(result["items"]) == 1
-    assert result["items"][0]["id"] == "ZWTEST02"
-    assert any("ac.mp3.zing.vn/complete" in url for url in urls)
+    class Session:
+        def __init__(self):
+            self.cookies = Cookies()
+            self.headers = {}
+        def get(self, url, timeout=30):
+            return Response()
+
+    monkeypatch.setattr(zing.requests, "Session", Session)
+    assert zing.get_stream_url("aQRFouTSGHqf") == "https://cdn.example/128.mp3"
 
 
 def test_nhaccuatui_parser_supports_current_song_links(monkeypatch):
@@ -116,25 +145,4 @@ def test_nhaccuatui_parser_supports_current_song_links(monkeypatch):
     monkeypatch.setattr(nct.urllib.request, "urlopen", lambda *a, **k: Response())
     result = nct.search("Việt nam quê hương tôi")
     assert len(result["items"]) == 1
-    assert result["items"][0]["title"] == "Việt Nam Quê Hương Tôi"
-
-
-def test_zingmp3_parser_supports_html_fallback(monkeypatch):
-    zing = load_provider("zingmp3")
-    html = '''
-      <a href="https://zingmp3.vn/bai-hat/viet-nam-que-huong-toi/ZWHTML01.html">
-        <span>Việt Nam Quê Hương Tôi</span>
-      </a>
-    '''
-    class Response:
-        def read(self): return html.encode('utf-8')
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-    def fake_urlopen(req, timeout=20):
-        if "zingmp3.vn/tim-kiem/bai-hat" in req.full_url:
-            return Response()
-        return Response()
-    monkeypatch.setattr(zing.urllib.request, "urlopen", fake_urlopen)
-    result = zing.search("Việt nam quê hương tôi")
-    assert result["items"][0]["id"] == "ZWHTML01"
     assert result["items"][0]["title"] == "Việt Nam Quê Hương Tôi"
