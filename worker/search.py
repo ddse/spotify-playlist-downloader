@@ -1,4 +1,5 @@
 import json
+import errno
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -24,13 +25,29 @@ def search(query: str, page: int = 1, limit: int = PAGE_SIZE, source: str = "you
 
 
 class Handler(BaseHTTPRequestHandler):
+    @staticmethod
+    def _client_disconnected(exc):
+        return isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)) or (
+            isinstance(exc, OSError) and exc.errno in {errno.EPIPE, errno.ECONNRESET, errno.ECONNABORTED}
+        )
+
     def _json(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as exc:
+            if self._client_disconnected(exc):
+                return False
+            raise
+        except OSError as exc:
+            if self._client_disconnected(exc):
+                return False
+            raise
 
     def do_GET(self):
         parsed = urlparse(self.path)
