@@ -4,7 +4,10 @@ from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import wireguard as manager
-from providers import PROVIDERS
+try:
+    from .providers import PROVIDERS
+except ImportError:  # pragma: no cover - supports running search.py directly
+    from providers import PROVIDERS
 
 PAGE_SIZE = 10
 HOST = "0.0.0.0"
