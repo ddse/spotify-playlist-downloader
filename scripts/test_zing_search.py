@@ -4,6 +4,12 @@
 This intentionally exercises the same signed API flow used by the provider.
 It is network-dependent and is run explicitly by CI.
 """
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
 from worker.providers import zingmp3
 
 QUERY = "Hoa Vo Sac"
