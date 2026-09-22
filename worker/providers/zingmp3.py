@@ -113,8 +113,18 @@ def _api(session, path, params, debug=None):
             "has_data": bool(data.get("data")),
         })
     if data.get("err") != 0:
+        err_code = data.get("err")
+        message = data.get("msg") or "unknown error"
+        if err_code == -1110:
+            raise ZingMp3Error(
+                "Zing MP3 streaming is geo-restricted (API -1110). "
+                "Search can work while audio streaming is blocked. "
+                "The download request must egress from a region where Zing "
+                "allows streaming (yt-dlp also identifies VN as Zing's geo "
+                "country). Check WireGuard routing/public IP before retrying."
+            )
         raise ZingMp3Error(
-            f"Zing MP3 API error {data.get('err')}: {data.get('msg') or 'unknown error'}"
+            f"Zing MP3 API error {err_code}: {message}"
         )
     return data
 
