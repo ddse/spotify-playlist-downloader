@@ -116,7 +116,7 @@ def debug_status():
         return {
             "requested_enabled": bool(_state),
             "interface": INTERFACE,
-            "config_exists": os.path.isfile(CONFIG),
+            "config_exists": os.path.isfile(CONFIG) or up,
             "interface_up": False,
             "route_active": False,
             "handshake_recent": False,
@@ -236,6 +236,7 @@ def status():
             "enabled": up,
             "interface": INTERFACE,
             "config_path": CONFIG,
+            "config_source": "file" if os.path.isfile(CONFIG) else ("live_interface" if up else "missing"),
             "config_exists": os.path.isfile(CONFIG),
             "route_active": route_active,
             "handshake_recent": handshake_recent,
