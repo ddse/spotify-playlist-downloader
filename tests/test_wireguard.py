@@ -214,5 +214,22 @@ class WireGuardManagerTests(unittest.TestCase):
         self.assertIn("interface is down", result["status_detail"])
 
 
+class WorkerApiHandlerTests(unittest.TestCase):
+    def test_json_ignores_client_disconnect_without_retrying_response(self):
+        from worker.search import Handler
+
+        class BrokenWriter:
+            def write(self, body):
+                raise BrokenPipeError(32, "Broken pipe")
+
+        handler = Handler.__new__(Handler)
+        handler.wfile = BrokenWriter()
+        handler.send_response = lambda status: None
+        handler.send_header = lambda name, value: None
+        handler.end_headers = lambda: None
+
+        self.assertFalse(handler._json(200, {"ok": True}))
+
+
 if __name__ == "__main__":
     unittest.main()
