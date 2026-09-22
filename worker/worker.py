@@ -350,7 +350,7 @@ def download_zingmp3(row, c, track_id):
     return str(output.resolve())
 
 
-def download(row, c, track_id):
+def download(row, c, track_id, download_started_at=0):
     Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
     url = row['source_url']
     source_mode = row['source_mode'] or 'single'
@@ -548,7 +548,7 @@ while True:
         try:
             result_path = manager.run_download(
                 use_wireguard,
-                lambda: download(row, c, track_id),
+                lambda: download(row, c, track_id, download_started_at),
             )
             file_path = str(Path(result_path).resolve()) if result_path else resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
             if file_path and not Path(file_path).is_file():
