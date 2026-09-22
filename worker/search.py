@@ -34,6 +34,7 @@ def search(query: str, page: int = 1, limit: int = PAGE_SIZE, source: str = "you
         raise ValueError(f"unsupported search provider: {source}")
     use_wireguard = manager.setting_enabled() if wireguard is None else bool(wireguard)
     trace["wireguard_used"] = use_wireguard
+    trace["steps"].append({"step": "wireguard_policy", "status": "passive", "detail": "search inherits the worker network namespace; it does not toggle WireGuard"})
     trace["steps"].append({"step": "worker_received", "status": "ok", "detail": "search request reached worker"})
     before = manager.debug_status()
     trace["steps"].append({"step": "wireguard_before", "status": before.get("status"), "detail": before})
@@ -44,7 +45,7 @@ def search(query: str, page: int = 1, limit: int = PAGE_SIZE, source: str = "you
                 return provider(query, page, limit, debug=True)
             return provider(query, page, limit)
 
-        result = manager.run(use_wireguard, call_provider)
+        result = call_provider()
         provider_debug = result.pop("_provider_debug", None) if isinstance(result, dict) else None
         if provider_debug:
             trace["provider_debug"] = provider_debug
