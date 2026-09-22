@@ -9,6 +9,8 @@ CONFIG = os.getenv("WG_CONFIG", "/etc/wireguard/wg0.conf")
 INTERFACE = os.getenv("WG_INTERFACE", "wg0")
 _lock = threading.RLock()
 _state = False
+_operation = None
+_operation_error = ""
 
 
 def _run(*args):
@@ -66,6 +68,31 @@ def run(enabled, func):
 def run_download(enabled, func):
     """Run a download without toggling the global WireGuard interface."""
     return func()
+
+def apply_enabled_async(enabled: bool):
+    """Start a WireGuard transition without blocking the HTTP request."""
+    global _operation, _operation_error
+    target = "connecting" if enabled else "disconnecting"
+    with _lock:
+        if _operation:
+            return False
+        _operation = target
+        _operation_error = ""
+
+    def worker():
+        global _operation, _operation_error
+        try:
+            set_enabled(enabled)
+        except Exception as exc:
+            with _lock:
+                _operation_error = f"{type(exc).__name__}: {exc}"
+        finally:
+            with _lock:
+                _operation = None
+
+    threading.Thread(target=worker, name="wireguard-transition", daemon=True).start()
+    return True
+
 
 def debug_status():
     """Lightweight WireGuard diagnostics for search/debug flows."""
@@ -160,23 +187,34 @@ def _handshake_status():
 
 def status():
     with _lock:
+        operation = _operation
+        operation_error = _operation_error
         up = is_up()
         route_active, routes = _route_status() if up else (False, [])
         handshake_recent, peers = _handshake_status() if up else (False, [])
         public_ip = _public_ip() if up and route_active else ""
         vpn_route = up and route_active and handshake_recent and bool(public_ip)
-        if not up:
+        if operation:
+            status = operation
+            status_detail = (
+                "WireGuard is connecting; waiting for the tunnel handshake"
+                if operation == "connecting"
+                else "WireGuard is disconnecting"
+            )
+            if operation_error:
+                status_detail += f": {operation_error}"
+        elif not up:
             status = "disconnected"
             status_detail = "WireGuard interface is down"
         elif not route_active:
-            status = "routing"
-            status_detail = "Interface is up but no WireGuard default route is active"
+            status = "connecting"
+            status_detail = "Interface is up; waiting for WireGuard routing"
         elif not handshake_recent:
-            status = "routing"
-            status_detail = "Route is active but no recent peer handshake was detected"
+            status = "connecting"
+            status_detail = "Route is active; waiting for a recent peer handshake"
         elif not public_ip:
-            status = "routing"
-            status_detail = "Tunnel handshake is recent but public IP could not be detected"
+            status = "connecting"
+            status_detail = "Tunnel handshake is recent; waiting for public IP detection"
         else:
             status = "connected"
             status_detail = "WireGuard tunnel is connected and routed"
@@ -203,6 +241,8 @@ def status():
             "vpn_route": vpn_route,
             "status": status,
             "status_detail": status_detail,
+            "operation": operation,
+            "operation_error": operation_error,
             "public_ip": public_ip,
             "peer_count": len(peers),
             "peers": peers,
