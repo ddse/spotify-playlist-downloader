@@ -211,6 +211,8 @@ def status():
             status = "connecting"
             status_detail = "Interface is up; waiting for WireGuard routing"
         elif not handshake_recent:
+            # An active route without a recent handshake is not an established VPN.
+            # Keep the UI in the connection phase until the peer has handshaken.
             status = "connecting"
             status_detail = "Route is active; waiting for a recent peer handshake"
         elif not public_ip:
