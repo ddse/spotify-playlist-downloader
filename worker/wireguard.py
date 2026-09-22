@@ -28,16 +28,17 @@ def is_up():
 
 def set_enabled(enabled: bool):
     global _state
-    with _lock:
-        if enabled:
-            if not os.path.exists(CONFIG):
-                raise RuntimeError(f"WireGuard config not found: {CONFIG}")
-            if not is_up():
-                _run("wg-quick", "up", CONFIG)
+    if enabled:
+        if not os.path.exists(CONFIG):
+            raise RuntimeError(f"WireGuard config not found: {CONFIG}")
+        if not is_up():
+            _run("wg-quick", "up", CONFIG)
+        with _lock:
             _state = True
-        else:
-            if is_up():
-                _run("wg-quick", "down", CONFIG)
+    else:
+        if is_up():
+            _run("wg-quick", "down", CONFIG)
+        with _lock:
             _state = False
 
 
