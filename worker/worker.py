@@ -516,75 +516,81 @@ def format_error(exc, logger_text=''):
     return '\n\n'.join(p for p in parts if p)[-20000:]
 
 
-threading.Thread(target=serve_search_api, name='search-api', daemon=True).start()
+def run_worker():
+    threading.Thread(target=serve_search_api, name='search-api', daemon=True).start()
 
-while True:
-    c = None
-    try:
-        c = conn()
-        init(c)
-        heartbeat(c)
-
-        row = c.execute(
-            "SELECT * FROM tracks WHERE status='queued' AND source_url IS NOT NULL ORDER BY priority DESC, created_at LIMIT 1"
-        ).fetchone()
-
-        if not row:
-            c.close()
-            time.sleep(3)
-            continue
-
-        track_id = row['spotify_id']
-        logger.info('download job picked track=%s source=%s title=%r', track_id, row['source_url'], row['title'])
-        c.execute(
-            "UPDATE tracks SET status='downloading',progress=1,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
-            (track_id,),
-        )
-        c.commit()
-        heartbeat(c, 'starting:' + track_id)
-
-        use_wireguard = bool(row['wireguard'])
-        download_started_at = time.time()
-        try:
-            result_path = manager.run_download(
-                use_wireguard,
-                lambda: download(row, c, track_id, download_started_at),
-            )
-            file_path = str(Path(result_path).resolve()) if result_path else resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
-            if file_path and not Path(file_path).is_file():
-                logger.warning('download returned missing path track=%s path=%s; falling back to scan', track_id, file_path)
-                file_path = resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
-            logger.info('download output resolved track=%s path=%s', track_id, file_path or '<missing>')
-            if not file_path:
-                recent = describe_recent_media(MUSIC_DIR, download_started_at)
-                logger.error(
-                    'download returned success but no media output was found track=%s recent_media=%s',
-                    track_id, recent,
-                )
-                raise RuntimeError(
-                    'download completed but output media file was not found; '
-                    f'recent_media={recent}'
-                )
-            c.execute(
-                "UPDATE tracks SET status='completed',progress=100,error=NULL,file_path=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
-                (file_path, track_id),
-            )
-        except Exception as e:
-            logger.exception('download job failed track=%s', track_id)
-            err = format_error(e, getattr(e, 'logs', ''))
-            c.execute(
-                "UPDATE tracks SET status='failed',progress=0,error=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
-                (err, track_id),
-            )
-            heartbeat(c, 'failed:' + track_id)
-
-        c.commit()
-        heartbeat(c, 'idle')
-        c.close()
-    except Exception:
-        if c is not None:
+    while True:
+            c = None
             try:
+                c = conn()
+                init(c)
+                heartbeat(c)
+
+                row = c.execute(
+                    "SELECT * FROM tracks WHERE status='queued' AND source_url IS NOT NULL ORDER BY priority DESC, created_at LIMIT 1"
+                ).fetchone()
+
+                if not row:
+                    c.close()
+                    time.sleep(3)
+                    continue
+
+                track_id = row['spotify_id']
+                logger.info('download job picked track=%s source=%s title=%r', track_id, row['source_url'], row['title'])
+                c.execute(
+                    "UPDATE tracks SET status='downloading',progress=1,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
+                    (track_id,),
+                )
+                c.commit()
+                heartbeat(c, 'starting:' + track_id)
+
+                use_wireguard = bool(row['wireguard'])
+                download_started_at = time.time()
+                try:
+                    result_path = manager.run_download(
+                        use_wireguard,
+                        lambda: download(row, c, track_id, download_started_at),
+                    )
+                    file_path = str(Path(result_path).resolve()) if result_path else resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
+                    if file_path and not Path(file_path).is_file():
+                        logger.warning('download returned missing path track=%s path=%s; falling back to scan', track_id, file_path)
+                        file_path = resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
+                    logger.info('download output resolved track=%s path=%s', track_id, file_path or '<missing>')
+                    if not file_path:
+                        recent = describe_recent_media(MUSIC_DIR, download_started_at)
+                        logger.error(
+                            'download returned success but no media output was found track=%s recent_media=%s',
+                            track_id, recent,
+                        )
+                        raise RuntimeError(
+                            'download completed but output media file was not found; '
+                            f'recent_media={recent}'
+                        )
+                    c.execute(
+                        "UPDATE tracks SET status='completed',progress=100,error=NULL,file_path=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
+                        (file_path, track_id),
+                    )
+                except Exception as e:
+                    logger.exception('download job failed track=%s', track_id)
+                    err = format_error(e, getattr(e, 'logs', ''))
+                    c.execute(
+                        "UPDATE tracks SET status='failed',progress=0,error=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
+                        (err, track_id),
+                    )
+                    heartbeat(c, 'failed:' + track_id)
+
+                c.commit()
+                heartbeat(c, 'idle')
                 c.close()
             except Exception:
-                pass
-        time.sleep(10)
+                if c is not None:
+                    try:
+                        c.close()
+                    except Exception:
+                        pass
+                time.sleep(10)
+
+
+
+if __name__ == "__main__":
+    run_worker()
