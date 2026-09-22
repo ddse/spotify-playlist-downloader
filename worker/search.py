@@ -143,8 +143,10 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(length).decode("utf-8") if length else ""
             params = parse_qs(body)
             enabled = params.get("enabled", ["0"])[0].lower() in {"1", "true", "yes", "on"}
-            manager.set_enabled(enabled)
-            return self._json(200, manager.status())
+            started = manager.apply_enabled_async(enabled)
+            result = manager.status()
+            result["transition_started"] = started
+            return self._json(200, result)
         except Exception as exc:
             return self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
 
