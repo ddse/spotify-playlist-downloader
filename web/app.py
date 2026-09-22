@@ -297,21 +297,21 @@ async def search_spotify(q:str=''):
     }
 
 @app.get('/api/search/youtube')
-async def search_youtube(q:str='',page:int=1,limit:int=10):
+async def search_youtube(q:str='',page:int=1,limit:int=10,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit,wireguard=wireguard_enabled())
+    try:return await youtube_search(q,page=page,limit=limit,wireguard=wireguard_enabled(),debug=bool(debug))
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.get('/api/search/zingmp3')
-async def search_zingmp3(q:str='',page:int=1,limit:int=10):
+async def search_zingmp3(q:str='',page:int=1,limit:int=10,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit,source='zingmp3',wireguard=wireguard_enabled())
+    try:return await youtube_search(q,page=page,limit=limit,source='zingmp3',wireguard=wireguard_enabled(),debug=bool(debug))
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.get('/api/search/nhaccuatui')
-async def search_nhaccuatui(q:str='',page:int=1,limit:int=10):
+async def search_nhaccuatui(q:str='',page:int=1,limit:int=10,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit,source='nhaccuatui',wireguard=wireguard_enabled())
+    try:return await youtube_search(q,page=page,limit=limit,source='nhaccuatui',wireguard=wireguard_enabled(),debug=bool(debug))
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.post('/api/download')
