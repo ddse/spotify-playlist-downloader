@@ -11,7 +11,7 @@ from spotify import authorize_url, exchange, access_token, public_search, playli
 from youtube import search as youtube_search
 
 DEBUG_MODE=os.getenv('DEBUG','0').lower() in {'1','true','yes','on','debug'}
-LOG_LEVEL=os.getenv('LOG_LEVEL','DEBUG' if DEBUG_MODE else 'INFO').upper()
+LOG_LEVEL='DEBUG' if DEBUG_MODE else os.getenv('LOG_LEVEL','INFO').upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format='%(asctime)s %(levelname)s [web] %(message)s')
 logger=logging.getLogger('web')
 logger.info('Web logging initialized debug=%s log_level=%s', DEBUG_MODE, LOG_LEVEL)
