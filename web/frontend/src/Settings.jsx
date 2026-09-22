@@ -27,10 +27,12 @@ export default function Settings({onClose}) {
   const [wireguardFiles,setWireguardFiles]=useState([]);
   const [findingWireguard,setFindingWireguard]=useState(false);
   const [togglingWireguard,setTogglingWireguard]=useState(false);
+  const [debugStatus,setDebugStatus]=useState(null);
   useEffect(()=>{
     api('/api/settings/connections').then(d=>setItems(d.items||{})).catch(e=>setMessage(e.message));
     const refreshWireguard=()=>api('/api/settings/wireguard').then(setWireguard).catch(e=>setWireguard(x=>({...x,status:'unavailable',detail:e.message})));
     refreshWireguard();
+    api('/api/debug').then(setDebugStatus).catch(()=>setDebugStatus(null));
     const timer=setInterval(refreshWireguard,3000);
     return()=>clearInterval(timer);
   },[]);
@@ -44,6 +46,17 @@ export default function Settings({onClose}) {
   const test=async()=>{setTesting(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected+'/test',{method:'POST'});setMessage(d.ok?'Connection test successful':(d.error||'Connection test failed'));setItems(x=>({...x,[selected]:{...x[selected],status:d.status,error:d.error||''}}));}catch(e){setMessage(e.message)}finally{setTesting(false)}};
   return <div className="glass mt-4 rounded-2xl p-5">
     <div className="flex items-center justify-between border-b border-white/10 pb-4"><div><h2 className="text-lg font-semibold">Provider Connections</h2><p className="text-xs text-zinc-500">Settings are stored in the application database and applied at runtime.</p></div><button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-2 text-sm">Close</button></div>
+    <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div><h3 className="font-medium">Debug logging</h3><p className="text-xs text-zinc-500">Controlled by the Docker environment variable DEBUG.</p></div>
+        <span className={'rounded-lg border px-3 py-1.5 text-xs '+(debugStatus?.debug?'border-emerald-500/30 text-emerald-300':'border-white/10 text-zinc-400')}>{debugStatus?.debug?'enabled':'disabled'}</span>
+      </div>
+      <div className="mt-3 grid gap-2 text-xs text-zinc-400 md:grid-cols-2">
+        <div>Log level: <span className="text-zinc-200">{debugStatus?.log_level||'—'}</span></div>
+        <div>Docker: <code className="text-zinc-200">docker compose logs -f worker web scheduler</code></div>
+      </div>
+      <p className="mt-2 text-xs text-zinc-500">Set <code>DEBUG=1</code> in <code>.env</code>, then recreate the containers. Debug output includes provider resolution, HTTP responses, download stages and failures.</p>
+    </div>
     <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h3 className="font-medium">WireGuard</h3><p className="text-xs text-zinc-500">Live routing status and mounted configuration.</p></div>
