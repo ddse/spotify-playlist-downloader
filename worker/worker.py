@@ -301,6 +301,7 @@ def download_nhaccuatui(row, c, track_id):
 
         temp.replace(output)
         logger.info('NCT download complete track=%s bytes=%d output=%s', track_id, downloaded, output)
+        return str(output.resolve())
     except Exception as exc:
         logger.exception('NCT download failed track=%s: %s', track_id, exc)
         try:
@@ -410,11 +411,9 @@ def download(row, c, track_id):
     url = row['source_url']
     source_mode = row['source_mode'] or 'single'
     if is_zingmp3(url):
-        download_zingmp3(row, c, track_id)
-        return
+        return download_zingmp3(row, c, track_id)
     if is_nhaccuatui(url):
-        download_nhaccuatui(row, c, track_id)
-        return
+        return download_nhaccuatui(row, c, track_id)
     if not url:
         raise RuntimeError('No download source selected')
 
@@ -603,11 +602,14 @@ while True:
         use_wireguard = bool(row['wireguard'])
         download_started_at = time.time()
         try:
-            manager.run_download(
+            result_path = manager.run_download(
                 use_wireguard,
                 lambda: download(row, c, track_id),
             )
-            file_path = resolve_downloaded_file(row, download_started_at)
+            file_path = str(Path(result_path).resolve()) if result_path else resolve_downloaded_file(row, download_started_at)
+            if file_path and not Path(file_path).is_file():
+                logger.warning('download returned missing path track=%s path=%s; falling back to scan', track_id, file_path)
+                file_path = resolve_downloaded_file(row, download_started_at)
             logger.info('download output resolved track=%s path=%s', track_id, file_path or '<missing>')
             if not file_path:
                 raise RuntimeError('download completed but output media file was not found')
