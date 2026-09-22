@@ -88,6 +88,29 @@ def format_speed(value):
     return f'{value:.1f} {units[i]}'
 
 
+def resolve_downloaded_file(row):
+    """Resolve the actual media file produced by a downloader."""
+    music = Path(MUSIC_DIR).resolve()
+    artist = (row['artists'] or 'Unknown Artist').replace('/', '_')
+    album = (row['album'] or 'YouTube').replace('/', '_')
+    title = (row['title'] or 'Unknown Title').replace('/', '_')
+    custom = (row['download_folder'] or '').strip()
+    folder = (music / custom) if custom else (music / artist / album)
+    folder = folder.resolve()
+    if music not in folder.parents and folder != music:
+        raise RuntimeError('invalid download folder')
+    candidates = []
+    if folder.exists():
+        candidates.extend(p for p in folder.glob(f'{title}.*') if p.is_file())
+    if not candidates and folder.exists():
+        candidates.extend(p for p in folder.rglob('*') if p.is_file() and p.stem == title)
+    excluded = {'.jpg', '.jpeg', '.png', '.webp', '.vtt', '.srt', '.ass', '.lrc', '.part', '.ytdl'}
+    candidates = [p for p in candidates if p.suffix.lower() not in excluded]
+    if not candidates:
+        return ''
+    return str(max(candidates, key=lambda p: p.stat().st_mtime).resolve())
+
+
 def format_eta(seconds):
     if seconds is None or seconds < 0:
         return ''
@@ -434,9 +457,12 @@ while True:
                 use_wireguard,
                 lambda: download(row, c, track_id),
             )
+            file_path = resolve_downloaded_file(row)
+            if not file_path:
+                raise RuntimeError('download completed but output media file was not found')
             c.execute(
-                "UPDATE tracks SET status='completed',progress=100,error=NULL,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
-                (track_id,),
+                "UPDATE tracks SET status='completed',progress=100,error=NULL,file_path=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
+                (file_path, track_id),
             )
         except Exception as e:
             err = format_error(e, getattr(e, 'logs', ''))
