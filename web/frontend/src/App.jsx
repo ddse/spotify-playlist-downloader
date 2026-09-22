@@ -8,7 +8,7 @@ const bytes=n=>{n=Number(n||0);if(!n)return '—';const u=['B','KB','MB','GB'];l
 const time=s=>{if(!s)return '';s=Math.round(s);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 
 function Badge({children,tone=''}){return <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',tone==='green'?'bg-emerald-500/15 text-emerald-300':tone==='red'?'bg-red-500/15 text-red-300':'bg-zinc-800 text-zinc-300')}>{children}</span>}
-function Btn({children,onClick,primary=false,danger=false,disabled=false}){const [loading,setLoading]=useState(false);const handleClick=async e=>{if(disabled||loading)return;setLoading(true);try{return await onClick?.(e)}finally{setLoading(false)}};return <button type="button" disabled={disabled||loading} aria-busy={loading||undefined} onClick={handleClick} className={cn('inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition disabled:opacity-40',primary?'border-violet-500/40 bg-violet-600 text-white hover:bg-violet-500':danger?'border-red-500/20 bg-red-500/10 text-red-300 hover:bg-red-500/20':'border-white/10 bg-white/[.03] text-zinc-300 hover:bg-white/[.07]')}>{loading&&<RefreshCw size={14} className="animate-spin" aria-hidden="true"/>}{children}</button>}
+function Btn({children,onClick,primary=false,danger=false,disabled=false}){return <button disabled={disabled} onClick={onClick} className={cn('inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition disabled:opacity-40',primary?'border-violet-500/40 bg-violet-600 text-white hover:bg-violet-500':danger?'border-red-500/20 bg-red-500/10 text-red-300 hover:bg-red-500/20':'border-white/10 bg-white/[.03] text-zinc-300 hover:bg-white/[.07]')}>{children}</button>}
 
 function DownloadOptions({item}){const [useWireGuard,setUseWireGuard]=useState(()=>localStorage.getItem('music-wireguard')==='1');useEffect(()=>{const f=()=>setUseWireGuard(localStorage.getItem('music-wireguard')==='1');window.addEventListener('wireguard-setting',f);return()=>window.removeEventListener('wireguard-setting',f)},[]);const [type,setType]=useState('audio');const [sending,setSending]=useState(false);const [message,setMessage]=useState('');const submit=async e=>{e.preventDefault();if(sending)return;setSending(true);setMessage('');try{const fd=new FormData(e.currentTarget);await api('/api/download',{method:'POST',body:fd});setMessage('Added to queue');window.dispatchEvent(new CustomEvent('queue-updated'));}catch(err){setMessage(err.message||'Download failed')}finally{setSending(false)}};return <details className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3"><summary className="cursor-pointer text-sm font-medium text-zinc-200">Download options</summary><form onSubmit={submit} className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
 <input type="hidden" name="source_url" value={item.url}/><input type="hidden" name="youtube_id" value={item.id}/><input type="hidden" name="title" value={item.title}/><input type="hidden" name="artists" value={item.channel}/>
@@ -39,9 +39,9 @@ function App(){const [tab,setTab]=useState('downloading'),[showSettings,setShowS
  const bulk=async(action)=>{if(!selected.length)return;const fd=new FormData();fd.append('action',action);fd.append('ids',selected.join(','));await fetch('/api/queue/bulk',{method:'POST',body:fd});setSel(new Set());load()};
  const queue=data.jobs.filter(x=>['downloading','queued','paused','pending_source','failed'].includes(x.status));
  const stats=useMemo(()=>({queue:queue.length,done:data.history.filter(x=>x.status==='completed').length,subs:data.playlists.length}),[queue,data]);
- return <div className="mx-auto max-w-[1500px] px-4 pb-12 md:px-8">
+ return <><div className="mx-auto max-w-[1500px] px-4 pb-12 md:px-8">
  <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 py-5"><div className="flex items-center gap-3"><div className="rounded-xl bg-violet-600 p-2.5"><Music2/></div><div><h1 className="text-lg font-bold">Music Downloader</h1><p className="text-xs text-zinc-500">YouTube · Spotify · Zing MP3 · NhacCuaTui · Jellyfin</p></div></div><div className="flex items-center gap-2">{data.services&&<><Badge tone={data.services.worker.status==='online'?'green':'red'}>{data.services.worker.status==='online'?<Wifi size={13}/>:<WifiOff size={13}/>} Worker</Badge><Badge tone={data.services.scheduler.status==='online'?'green':'red'}>{data.services.scheduler.status==='online'?<Wifi size={13}/>:<WifiOff size={13}/>} Scheduler</Badge><Badge tone={data.services.wireguard?.status==='connected'?'green':(data.services.wireguard?.status==='connecting'||data.services.wireguard?.status==='disconnecting')?'':'red'}>{(data.services.wireguard?.status==='connected'||data.services.wireguard?.status==='connecting'||data.services.wireguard?.status==='disconnecting')?<Wifi size={13}/>:<WifiOff size={13}/>} WireGuard {data.services.wireguard?.status||'unknown'}</Badge></>}<Btn onClick={()=>setShowSettings(true)}>Settings</Btn><a href="/api/spotify/login"><Btn><Music2 size={15}/> Spotify Connect</Btn></a></div></header>
- {showSettings&&<Settings onClose={()=>setShowSettings(false)}/>}\n <section className="py-7"><div className="glass rounded-2xl p-3 shadow-2xl"><div className="flex gap-2"><div className="relative flex-1"><Search className="absolute left-3 top-3 text-zinc-500" size={18}/><input value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==='Enter'&&search(1)} placeholder="Search songs, artists or albums..." className="w-full rounded-xl border border-white/10 bg-black/20 py-2.5 pl-10 pr-3 outline-none focus:border-violet-500"/></div><select value={source} onChange={e=>setSource(e.target.value)} className="rounded-xl border border-white/10 bg-black/20 px-3 text-sm text-zinc-200 outline-none"><option value="all">All</option><option value="spotify">Spotify</option><option value="youtube">YouTube</option><option value="zingmp3">Zing MP3</option><option value="nhaccuatui">NhacCuaTui</option></select><Btn onClick={()=>{const v=!debugMode;setDebugMode(v);localStorage.setItem('music-search-debug',v?'1':'0')}}><Bug size={15}/> Debug {debugMode?'ON':'OFF'}</Btn><Btn primary onClick={()=>search(1)} disabled={busy}><Search size={17}/> Search</Btn></div></div></section>
+ {showSettings&&<Settings onClose={()=>setShowSettings(false)}/>}<section className="py-7"><div className="glass rounded-2xl p-3 shadow-2xl"><div className="flex gap-2"><div className="relative flex-1"><Search className="absolute left-3 top-3 text-zinc-500" size={18}/><input value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==='Enter'&&search(1)} placeholder="Search songs, artists or albums..." className="w-full rounded-xl border border-white/10 bg-black/20 py-2.5 pl-10 pr-3 outline-none focus:border-violet-500"/></div><select value={source} onChange={e=>setSource(e.target.value)} className="rounded-xl border border-white/10 bg-black/20 px-3 text-sm text-zinc-200 outline-none"><option value="all">All</option><option value="spotify">Spotify</option><option value="youtube">YouTube</option><option value="zingmp3">Zing MP3</option><option value="nhaccuatui">NhacCuaTui</option></select><Btn onClick={()=>{const v=!debugMode;setDebugMode(v);localStorage.setItem('music-search-debug',v?'1':'0')}}><Bug size={15}/> Debug {debugMode?'ON':'OFF'}</Btn><Btn primary onClick={()=>search(1)} disabled={busy}><Search size={17}/> Search</Btn></div></div></section>
  {(busy||results.youtube.length||results.spotify.length||results.zingmp3.length||results.nhaccuatui.length||Object.keys(searchErrors).length>0)&&<section className="space-y-5">
  {busy&&<div className="glass rounded-2xl border border-violet-500/20 bg-violet-500/5 p-6"><div className="flex items-center justify-center gap-3 text-sm text-zinc-300"><RefreshCw size={20} className="animate-spin text-violet-400"/><span>Searching ... Please wait</span></div></div>} {debugMode&&Object.keys(searchDebug).length>0&&<SearchDebugPanel traces={searchDebug}/>}
 
@@ -51,8 +51,70 @@ function App(){const [tab,setTab]=useState('downloading'),[showSettings,setShowS
  </section>}
  <section className="mt-8"><div className="grid grid-cols-3 gap-3">{[['downloading',Download,stats.queue,'Queue'],['completed',CheckCircle2,stats.done,'Completed'],['subscriptions',ListMusic,stats.subs,'Subscriptions']].map(([id,I,n,label])=><button key={id} onClick={()=>setTab(id)} className={cn('rounded-2xl border p-4 text-left transition',tab===id?'border-violet-500/40 bg-violet-500/10':'border-white/5 bg-white/[.02] hover:bg-white/[.05]')}><div className="flex items-center justify-between"><I size={18} className="text-violet-300"/><span className="text-2xl font-bold">{n}</span></div><div className="mt-2 text-sm text-zinc-400">{label}</div></button>)}</div></section>
  {tab==='downloading'&&<section className="glass mt-4 overflow-hidden rounded-2xl"><Toolbar title="Downloading" icon={Download} count={queue.length} onRefresh={load} actions={<><Btn onClick={()=>selectAll(queue.map(x=>x.spotify_id))} disabled={!queue.length}><CheckSquare size={15}/> Select all</Btn><Btn onClick={clearSelection} disabled={!selected.length}><Square size={15}/> Clear</Btn><Btn onClick={()=>bulk('clear_selected')} disabled={!selected.length}><Trash2 size={15}/> Cancel selected</Btn><Btn onClick={()=>bulk('download_selected')} disabled={!selected.length}><Download size={15}/> Download selected</Btn></>}/><div className="scrollbar overflow-x-auto"><div className="grid min-w-[900px] grid-cols-[34px_2fr_100px_1.3fr_1.5fr_220px] gap-3 border-b border-white/5 bg-black/10 px-4 py-2 text-xs uppercase tracking-wide text-zinc-500"><div></div><div>Video</div><div>Status</div><div>Format</div><div>Progress / Speed</div><div>Actions</div></div>{queue.map(x=><QueueRow key={x.spotify_id} x={x} selected={sel.has(x.spotify_id)} onSelect={v=>setSel(s=>{const n=new Set(s);v?n.add(x.spotify_id):n.delete(x.spotify_id);return n})} onLoad={load}/>)}</div></section>}
- {tab==='completed'&&<section className="glass mt-4 overflow-hidden rounded-2xl"><Toolbar title="Completed" icon={CheckCircle2} count={data.history.length} onRefresh={load} actions={<><Btn onClick={()=>selectAll(data.history.map(x=>x.spotify_id))} disabled={!data.history.length}><CheckSquare size={15}/> Select all</Btn><Btn onClick={clearSelection} disabled={!selected.length}><Square size={15}/> Clear</Btn><Btn onClick={()=>bulk('clear_selected')} disabled={!selected.length}><Trash2 size={15}/> Clear selected</Btn><Btn onClick={()=>bulk('clear_completed')}><CheckCircle2 size={15}/> Clear completed</Btn><Btn onClick={()=>bulk('clear_failed')}><Trash2 size={15}/> Clear failed</Btn><Btn onClick={()=>bulk('retry_failed')}><RotateCcw size={15}/> Retry failed</Btn></>}/><div className="scrollbar overflow-x-auto">{data.history.map(x=><div key={x.spotify_id} className="grid min-w-[900px] grid-cols-[34px_2fr_100px_1.5fr_110px_160px_120px] items-center gap-3 border-b border-white/5 px-4 py-3"><input type="checkbox" checked={sel.has(x.spotify_id)} onChange={e=>setSel(s=>{const n=new Set(s);e.target.checked?n.add(x.spotify_id):n.delete(x.spotify_id);return n})}/><div><div className="truncate font-medium">{x.title}</div><div className="text-xs text-zinc-500">{x.artists}</div></div><Badge tone={x.status==='failed'?'red':'green'}>{x.status}</Badge><div className="text-xs text-zinc-400">{x.download_quality||'best'} / {x.video_codec&&x.video_codec!=='auto'?x.video_codec+' / ':''}{x.download_format||''}</div><div className="text-xs">{bytes(x.total_bytes)}</div><div className="text-xs text-zinc-500">{x.updated_at}</div><div className="flex gap-1.5">{x.status==='completed'&&<><a href={"/api/files/"+encodeURIComponent(x.spotify_id)+"?download=1"}><Btn><Download size={14}/> Download</Btn></a><a href={"/api/files/"+encodeURIComponent(x.spotify_id)+"?download=0"} target="_blank" rel="noreferrer"><Btn><ExternalLink size={14}/> Open</Btn></a></>}{x.status!=='completed'&&x.source_url&&<a href={x.source_url} target="_blank" rel="noreferrer"><Btn><ExternalLink size={14}/> Source</Btn></a>}<Btn onClick={async()=>{await api('/api/retry/'+encodeURIComponent(x.spotify_id),{method:'POST'});load()}}><RotateCcw size={14}/></Btn></div></div>)}</div></section>}
+  {tab==='completed'&&(
+    <section className="glass mt-4 overflow-hidden rounded-2xl">
+      <Toolbar
+        title="Completed"
+        icon={CheckCircle2}
+        count={data.history.length}
+        onRefresh={load}
+        actions={
+          <>
+            <Btn onClick={()=>selectAll(data.history.map(x=>x.spotify_id))} disabled={!data.history.length}><CheckSquare size={15}/> Select all</Btn>
+            <Btn onClick={clearSelection} disabled={!selected.length}><Square size={15}/> Clear</Btn>
+            <Btn onClick={()=>bulk('clear_selected')} disabled={!selected.length}><Trash2 size={15}/> Clear selected</Btn>
+            <Btn danger onClick={()=>{if(confirm('Remove selected downloads and their local files?')) bulk('remove_selected')}} disabled={!selected.length}><Trash2 size={15}/> Remove files</Btn>
+            <Btn onClick={()=>bulk('clear_completed')}><CheckCircle2 size={15}/> Clear completed</Btn>
+            <Btn onClick={()=>bulk('clear_failed')}><Trash2 size={15}/> Clear failed</Btn>
+            <Btn onClick={()=>bulk('retry_failed')}><RotateCcw size={15}/> Retry failed</Btn>
+          </>
+        }
+      />
+      <div className="scrollbar overflow-x-auto">
+        {data.history.map(x=>(
+          <div key={x.spotify_id} className="grid min-w-[900px] grid-cols-[34px_2fr_100px_1.5fr_110px_160px_300px] items-center gap-3 border-b border-white/5 px-4 py-3">
+            <input
+              type="checkbox"
+              checked={sel.has(x.spotify_id)}
+              onChange={e=>setSel(s=>{
+                const n=new Set(s);
+                e.target.checked ? n.add(x.spotify_id) : n.delete(x.spotify_id);
+                return n;
+              })}
+            />
+            <div>
+              <div className="truncate font-medium">{x.title}</div>
+              <div className="text-xs text-zinc-500">{x.artists}</div>
+            </div>
+            <Badge tone={x.status==='failed'?'red':'green'}>{x.status}</Badge>
+            <div className="text-xs text-zinc-400">{x.download_quality||'best'} / {x.video_codec&&x.video_codec!=='auto'?x.video_codec+' / ':''}{x.download_format||''}</div>
+            <div className="text-xs">{bytes(x.total_bytes)}</div>
+            <div className="text-xs text-zinc-500">{x.updated_at}</div>
+            <div className="flex flex-wrap gap-1.5 whitespace-nowrap">
+              {x.status==='completed' && (
+                <>
+                  <a href={"/api/files/"+encodeURIComponent(x.spotify_id)+"?download=1"}><Btn><Download size={14}/> Download</Btn></a>
+                  <a href={"/api/files/"+encodeURIComponent(x.spotify_id)+"?download=0"} target="_blank" rel="noreferrer"><Btn><Play size={14}/> Play</Btn></a>
+                </>
+              )}
+              {x.status!=='completed' && x.source_url && (
+                <a href={x.source_url} target="_blank" rel="noreferrer"><Btn><ExternalLink size={14}/> Source</Btn></a>
+              )}
+              <Btn onClick={async()=>{await api('/api/retry/'+encodeURIComponent(x.spotify_id),{method:'POST'});load()}}><RotateCcw size={14}/></Btn>
+              {x.status==='completed' && (
+                <Btn danger onClick={async()=>{
+                  if(!confirm('Remove this download and its local file?')) return;
+                  await api('/api/files/'+encodeURIComponent(x.spotify_id),{method:'DELETE'});
+                  load();
+                }}><Trash2 size={14}/> Remove</Btn>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )}
  {tab==='subscriptions'&&<section className="glass mt-4 overflow-hidden rounded-2xl"><Toolbar title="Subscriptions" icon={ListMusic} count={data.playlists.length} onRefresh={load} actions={<><Btn onClick={()=>selectAll(data.playlists.map(x=>x.spotify_id))} disabled={!data.playlists.length}><CheckSquare size={15}/> Select all</Btn><Btn onClick={clearSelection} disabled={!selected.length}><Square size={15}/> Clear</Btn><Btn onClick={async()=>{for(const p of data.playlists)if(p.enabled)await api('/api/playlists/'+encodeURIComponent(p.spotify_id)+'/sync-manual',{method:'POST'});load()}}><RefreshCw size={15}/> Check all now</Btn><Btn onClick={async()=>{for(const id of selected)await api('/api/playlists/'+encodeURIComponent(id)+'/sync-manual',{method:'POST'});load()} } disabled={!selected.length}><RefreshCw size={15}/> Check selected</Btn><Btn danger onClick={async()=>{for(const id of selected)await api('/api/playlists/'+encodeURIComponent(id),{method:'DELETE'});setSel(new Set());load()}} disabled={!selected.length}><Trash2 size={15}/> Delete selected</Btn></>}/><div>{data.playlists.map(p=><div key={p.spotify_id} className="flex flex-wrap items-center gap-4 border-b border-white/5 px-4 py-4"><input type="checkbox" checked={sel.has(p.spotify_id)} onChange={e=>setSel(s=>{const n=new Set(s);e.target.checked?n.add(p.spotify_id):n.delete(p.spotify_id);return n})}/><div className="min-w-[260px] flex-1"><div className="font-medium">{p.name}</div><div className="text-xs text-zinc-500">{p.url}</div></div><a href={p.url} target="_blank" rel="noreferrer"><Btn><ExternalLink size={14}/> Open</Btn></a><Badge tone={p.enabled?'green':'red'}>{p.enabled?'enabled':'disabled'}</Badge><span className="text-xs text-zinc-500">Last sync: {p.last_sync||'never'}</span><Btn onClick={async()=>{await api('/api/playlists/'+encodeURIComponent(p.spotify_id)+'/sync-manual',{method:'POST'});load()}}><RefreshCw size={14}/></Btn></div>)}</div></section>}
- </div>}
+ </div></>}
 function Toolbar({title:Title,icon:Icon,count,onRefresh,actions}){return <div className="flex flex-wrap items-center gap-3 border-b border-white/10 p-4"><div className="flex items-center gap-2 mr-2"><Icon size={18} className="text-violet-300"/><span className="font-semibold">{Title}</span><Badge>{count}</Badge></div>{actions}<div className="ml-auto"><Btn onClick={onRefresh}><RefreshCw size={15}/></Btn></div></div>}
 export default App;
