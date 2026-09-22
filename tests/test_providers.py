@@ -177,3 +177,46 @@ def test_zingmp3_search_debug_trace(monkeypatch):
     assert trace["normalized_count"] == 1
     assert any(step["step"] == "zing_http" for step in trace["steps"])
     assert any(step["step"] == "zing_json" and step["status"] == "ok" for step in trace["steps"])
+
+
+def test_zingmp3_streaming_error_trace_identifies_endpoint(monkeypatch):
+    zing = load_provider("zingmp3")
+    calls = []
+
+    class Response:
+        ok = True
+        status_code = 200
+        headers = {"Content-Type": "application/json"}
+        content = b'{"err":-1110}'
+        def raise_for_status(self): pass
+        def json(self):
+            return {"err": -1110, "msg": "country restricted", "data": None}
+
+    class Cookies:
+        def get(self, key, default=None):
+            return "test-rqid" if key == "zmp3_rqid" else default
+
+    class Session:
+        def __init__(self):
+            self.cookies = Cookies()
+            self.headers = {}
+        def get(self, url, timeout=30):
+            calls.append(url)
+            return Response()
+
+    monkeypatch.setattr(zing.requests, "Session", Session)
+    debug = []
+    try:
+        zing.get_stream_url("SONG1", debug=debug)
+        assert False, "expected ZingMp3Error"
+    except zing.ZingMp3Error as exc:
+        assert "API -1110" in str(exc)
+        assert "streaming API" in str(exc)
+
+    assert any("/api/v2/song/get/streaming" in url for url in calls)
+    assert any(
+        step.get("step") == "zing_json"
+        and step.get("err") == -1110
+        and step.get("status") == "error"
+        for step in debug
+    )
