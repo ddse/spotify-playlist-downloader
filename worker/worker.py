@@ -207,7 +207,7 @@ def download_zingmp3(row, c, track_id):
                 percent = int(downloaded * 100 / total) if total else 1
                 c.execute(
                     'UPDATE tracks SET progress=?,downloaded_bytes=?,total_bytes=?,download_speed=?,eta=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
-                    (max(1, min(99, percent)), downloaded, format_speed(
+                    (max(1, min(99, percent)), downloaded, total, format_speed(
                         downloaded / max(now - last_update, 1)
                     ), '', track_id),
                 )
