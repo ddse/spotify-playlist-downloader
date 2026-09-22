@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
 DEBUG_MODE = os.getenv('DEBUG', '0').lower() in {'1', 'true', 'yes', 'on', 'debug'}
-LOG_LEVEL = os.getenv('LOG_LEVEL', 'DEBUG' if DEBUG_MODE else 'INFO').upper()
+LOG_LEVEL = 'DEBUG' if DEBUG_MODE else os.getenv('LOG_LEVEL', 'INFO').upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO),
                     format='%(asctime)s %(levelname)s [worker] %(message)s')
 logger = logging.getLogger('worker')
