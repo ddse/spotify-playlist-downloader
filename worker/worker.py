@@ -145,72 +145,7 @@ def format_speed(value):
     return f'{value:.1f} {units[i]}'
 
 
-def resolve_downloaded_file(row, since=0):
-    """Resolve the actual media file produced by a downloader.
-
-    yt-dlp may sanitize/normalize the requested title, and post-processing
-    (for example FFmpeg audio extraction) can change the final extension.
-    Prefer files created/modified by this download, then fall back to a
-    normalized title match.
-    """
-    music = Path(MUSIC_DIR).resolve()
-    artist = (row['artists'] or 'Unknown Artist').replace('/', '_')
-    album = (row['album'] or 'YouTube').replace('/', '_')
-    title = (row['title'] or 'Unknown Title').replace('/', '_')
-    custom = (row['download_folder'] or '').strip()
-    folder = (music / custom) if custom else (music / artist / album)
-    folder = folder.resolve()
-    if music not in folder.parents and folder != music:
-        raise RuntimeError('invalid download folder')
-
-    excluded = {
-        '.jpg', '.jpeg', '.png', '.webp', '.gif', '.vtt', '.srt', '.ass',
-        '.lrc', '.part', '.ytdl', '.json', '.description', '.info.json',
-        '.chapters.json', '.txt', '.url', '.meta'
-    }
-    media_exts = {
-        '.mp3', '.m4a', '.opus', '.ogg', '.oga', '.wav', '.flac', '.aac',
-        '.webm', '.mp4', '.mkv', '.avi', '.mov'
-    }
-
-    if not folder.exists():
-        return ''
-
-    files = [
-        p for p in folder.rglob('*')
-        if p.is_file() and p.suffix.lower() not in excluded
-        and p.suffix.lower() in media_exts
-    ]
-    if not files:
-        return ''
-
-    # The worker processes one queued track at a time, so a media file
-    # appearing/being modified during this job is the strongest signal.
-    if since:
-        recent = [p for p in files if p.stat().st_mtime >= since - 2]
-        if recent:
-            return str(max(recent, key=lambda p: p.stat().st_mtime).resolve())
-
-    def normalize(value):
-        import re
-        return re.sub(r'[^a-z0-9]+', '', value.lower())
-
-    wanted = normalize(title)
-    exactish = [p for p in files if normalize(p.stem) == wanted]
-    if exactish:
-        return str(max(exactish, key=lambda p: p.stat().st_mtime).resolve())
-
-    # Last fallback: the newest media in the expected folder. This handles
-    # yt-dlp filename sanitization and FFmpeg-generated output names.
-    if since:
-        tree_files = [
-            p for p in music.rglob('*')
-            if p.is_file() and p.suffix.lower() in media_exts
-        ]
-        recent_tree = [p for p in tree_files if p.stat().st_mtime >= since - 2]
-        if recent_tree:
-            return str(max(recent_tree, key=lambda p: p.stat().st_mtime).resolve())
-    return str(max(files, key=lambda p: p.stat().st_mtime).resolve())
+from output import describe_recent_media, resolve_downloaded_file
 
 def format_eta(seconds):
     if seconds is None or seconds < 0:
@@ -615,13 +550,21 @@ while True:
                 use_wireguard,
                 lambda: download(row, c, track_id),
             )
-            file_path = str(Path(result_path).resolve()) if result_path else resolve_downloaded_file(row, download_started_at)
+            file_path = str(Path(result_path).resolve()) if result_path else resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
             if file_path and not Path(file_path).is_file():
                 logger.warning('download returned missing path track=%s path=%s; falling back to scan', track_id, file_path)
-                file_path = resolve_downloaded_file(row, download_started_at)
+                file_path = resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
             logger.info('download output resolved track=%s path=%s', track_id, file_path or '<missing>')
             if not file_path:
-                raise RuntimeError('download completed but output media file was not found')
+                recent = describe_recent_media(MUSIC_DIR, download_started_at)
+                logger.error(
+                    'download returned success but no media output was found track=%s recent_media=%s',
+                    track_id, recent,
+                )
+                raise RuntimeError(
+                    'download completed but output media file was not found; '
+                    f'recent_media={recent}'
+                )
             c.execute(
                 "UPDATE tracks SET status='completed',progress=100,error=NULL,file_path=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
                 (file_path, track_id),
