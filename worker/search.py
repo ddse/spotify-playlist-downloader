@@ -1,4 +1,5 @@
 import json
+import time
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -10,17 +11,46 @@ HOST = "0.0.0.0"
 PORT = 8090
 
 
-def search(query: str, page: int = 1, limit: int = PAGE_SIZE, source: str = "youtube", wireguard=None):
+def search(query: str, page: int = 1, limit: int = PAGE_SIZE, source: str = "youtube", wireguard=None, debug=False):
+    started = time.time()
     query = query.strip()
     page = max(1, int(page))
     limit = max(1, min(int(limit), PAGE_SIZE))
+    trace = {
+        "request_received": True,
+        "query": query,
+        "source": source,
+        "page": page,
+        "limit": limit,
+        "wireguard_requested": wireguard,
+        "wireguard_setting_enabled": manager.setting_enabled(),
+        "steps": [],
+    }
     if not query:
-        return {"items": [], "page": page, "limit": limit, "has_more": False}
+        trace["steps"].append({"step": "validate_query", "status": "skipped", "detail": "empty query"})
+        return {"items": [], "page": page, "limit": limit, "has_more": False, **({"debug": trace} if debug else {})}
     provider = PROVIDERS.get(source)
     if not provider:
         raise ValueError(f"unsupported search provider: {source}")
     use_wireguard = manager.setting_enabled() if wireguard is None else bool(wireguard)
-    return manager.run(use_wireguard, lambda: provider(query, page, limit))
+    trace["wireguard_used"] = use_wireguard
+    trace["steps"].append({"step": "worker_received", "status": "ok", "detail": "search request reached worker"})
+    before = manager.debug_status()
+    trace["steps"].append({"step": "wireguard_before", "status": before.get("status"), "detail": before})
+    provider_started = time.time()
+    try:
+        result = manager.run(use_wireguard, lambda: provider(query, page, limit))
+        after = manager.debug_status()
+        trace["steps"].append({"step": "wireguard_after", "status": after.get("status"), "detail": after})
+        trace["steps"].append({"step": "provider_search", "status": "ok", "duration_ms": round((time.time() - provider_started) * 1000), "result_count": len(result.get("items", []))})
+        trace["duration_ms"] = round((time.time() - started) * 1000)
+        return {**result, **({"debug": trace} if debug else {})}
+    except Exception as exc:
+        after = manager.debug_status()
+        trace["steps"].append({"step": "wireguard_after_error", "status": after.get("status"), "detail": after})
+        trace["steps"].append({"step": "provider_search", "status": "error", "duration_ms": round((time.time() - provider_started) * 1000), "error": f"{type(exc).__name__}: {exc}"})
+        trace["duration_ms"] = round((time.time() - started) * 1000)
+        raise
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -64,9 +94,10 @@ class Handler(BaseHTTPRequestHandler):
         source = params.get("source", ["youtube"])[0]
         wireguard = params.get("wireguard", [None])[0]
         use_wireguard = None if wireguard is None else wireguard.lower() in {"1", "true", "yes", "on"}
+        debug = params.get("debug", ["0"])[0].lower() in {"1", "true", "yes", "on"}
 
         try:
-            result = search(query, int(page), int(limit), source, use_wireguard)
+            result = search(query, int(page), int(limit), source, use_wireguard, debug)
             self._json(200, result)
         except Exception as exc:
             self._json(500, {
