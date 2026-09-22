@@ -179,7 +179,13 @@ async def wireguard_toggle(enabled: bool = Form(...)):
             # `enabled` remains the live interface state returned by worker.
             return result
     except Exception as e:
-        return {'enabled': False, 'requested_enabled': enabled, 'status': 'unavailable', 'error': str(e)}
+        return {
+            'enabled': False,
+            'requested_enabled': enabled,
+            'status': 'connecting' if enabled else 'unavailable',
+            'status_detail': 'WireGuard transition is still in progress; worker status is temporarily unavailable.' if enabled else '',
+            'error': str(e),
+        }
 
 
 @app.get('/api/settings/connections')
