@@ -60,13 +60,24 @@ def build_api_url(path, params):
     return f"{DOMAIN}{path}?{query}"
 
 
-def _initialize(session):
+def _initialize(session, debug=None):
     if session.cookies.get("zmp3_rqid"):
         return
     # Zing returns err=-201 for an empty song id; the response is still
     # useful because it sets the visitor cookie required by subsequent APIs.
     url = build_api_url("/api/v2/page/get/song", {"id": ""})
+    started = time.time()
     response = session.get(url, timeout=TIMEOUT)
+    if debug is not None:
+        debug.append({
+            "step": "zing_session_init",
+            "status": "ok" if response.ok else "error",
+            "http_status": response.status_code,
+            "content_type": response.headers.get("Content-Type", ""),
+            "content_length": len(response.content),
+            "duration_ms": round((time.time() - started) * 1000),
+            "cookie_created": bool(session.cookies.get("zmp3_rqid")),
+        })
     response.raise_for_status()
     if not session.cookies.get("zmp3_rqid"):
         raise ZingMp3Error("Zing MP3 session cookie zmp3_rqid was not created")
