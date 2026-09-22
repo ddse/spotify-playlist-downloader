@@ -39,7 +39,15 @@ def search(query: str, page: int = 1, limit: int = PAGE_SIZE, source: str = "you
     trace["steps"].append({"step": "wireguard_before", "status": before.get("status"), "detail": before})
     provider_started = time.time()
     try:
-        result = manager.run(use_wireguard, lambda: provider(query, page, limit))
+        def call_provider():
+            if debug and source == "zingmp3":
+                return provider(query, page, limit, debug=True)
+            return provider(query, page, limit)
+
+        result = manager.run(use_wireguard, call_provider)
+        provider_debug = result.pop("_provider_debug", None) if isinstance(result, dict) else None
+        if provider_debug:
+            trace["provider_debug"] = provider_debug
         after = manager.debug_status()
         trace["steps"].append({"step": "wireguard_after", "status": after.get("status"), "detail": after})
         trace["steps"].append({"step": "provider_search", "status": "ok", "duration_ms": round((time.time() - provider_started) * 1000), "result_count": len(result.get("items", []))})
