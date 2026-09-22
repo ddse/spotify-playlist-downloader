@@ -438,11 +438,24 @@ def import_youtube(source_url:str=Form(...),source_mode:str=Form('playlist'),dow
 
 @app.post('/api/queue/bulk')
 def queue_bulk(action:str=Form(...),ids:str=Form('')):
-    valid={'clear_selected','clear_completed','clear_failed','retry_failed','download_selected'}
+    valid={'clear_selected','clear_completed','clear_failed','retry_failed','download_selected','remove_selected'}
     if action not in valid: raise HTTPException(400,'invalid action')
     selected=[x for x in ids.split(',') if x]
     c=db()
     if action == 'clear_selected' and selected:
+        c.executemany("DELETE FROM tracks WHERE spotify_id=?",( (x,) for x in selected ))
+    elif action == 'remove_selected' and selected:
+        rows=c.execute("SELECT spotify_id,file_path,status FROM tracks WHERE spotify_id=?".replace("spotify_id=?","spotify_id IN (%s)" % ",".join("?"*len(selected))), tuple(selected)).fetchall()
+        music=Path(os.getenv('MUSIC_DIR','/music')).resolve()
+        for row in rows:
+            path_value=(row['file_path'] or '').strip()
+            if path_value:
+                try:
+                    p=Path(path_value).resolve()
+                    if p.is_file() and music in p.parents:
+                        p.unlink()
+                except OSError:
+                    pass
         c.executemany("DELETE FROM tracks WHERE spotify_id=?",( (x,) for x in selected ))
     elif action == 'clear_completed':
         c.execute("DELETE FROM tracks WHERE status='completed'")
@@ -453,6 +466,27 @@ def queue_bulk(action:str=Form(...),ids:str=Form('')):
     elif action == 'download_selected' and selected:
         c.executemany("UPDATE tracks SET status='queued',progress=0,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status='completed'",((x,) for x in selected))
     c.commit(); c.close()
+    return {'ok':True}
+
+@app.delete('/api/files/{track_id}')
+def remove_file(track_id:str):
+    c=db()
+    row=c.execute("SELECT * FROM tracks WHERE spotify_id=?", (track_id,)).fetchone()
+    if not row:
+        c.close()
+        raise HTTPException(404, 'track not found')
+    music=Path(os.getenv('MUSIC_DIR','/music')).resolve()
+    path_value=(row['file_path'] or '').strip() if 'file_path' in row.keys() else ''
+    if path_value:
+        try:
+            p=Path(path_value).resolve()
+            if p.is_file() and music in p.parents:
+                p.unlink()
+        except OSError:
+            pass
+    c.execute("DELETE FROM tracks WHERE spotify_id=?", (track_id,))
+    c.commit()
+    c.close()
     return {'ok':True}
 
 @app.post('/api/retry/{track_id}')
