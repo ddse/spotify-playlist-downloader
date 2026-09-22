@@ -61,6 +61,12 @@ FMT = os.getenv('AUDIO_FORMAT', 'mp3')
 BITRATE = os.getenv('AUDIO_BITRATE', '320K')
 
 
+class DownloadDebugError(RuntimeError):
+    def __init__(self, message, logs=''):
+        super().__init__(message)
+        self.logs = logs
+
+
 def conn():
     from database import db
     return db()
@@ -366,11 +372,20 @@ def download(row, c, track_id):
             opts['format'] = f'bestvideo{height}+bestaudio/best{height}'
         opts['merge_output_format'] = 'mp4'
 
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        result = ydl.download([url])
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            result = ydl.download([url])
+    except Exception as exc:
+        raise DownloadDebugError(
+            f'{type(exc).__name__}: {exc}',
+            '\\n'.join(log_lines),
+        ) from exc
 
     if result not in (None, 0):
-        raise RuntimeError(f'yt-dlp exited with code {result}')
+        raise DownloadDebugError(
+            f'yt-dlp exited with code {result}',
+            '\\n'.join(log_lines),
+        )
 
 
 def format_error(exc, logger_text=''):
@@ -424,7 +439,7 @@ while True:
                 (track_id,),
             )
         except Exception as e:
-            err = format_error(e, '\n'.join(log_lines) if 'log_lines' in locals() else '')
+            err = format_error(e, getattr(e, 'logs', ''))
             c.execute(
                 "UPDATE tracks SET status='failed',progress=0,error=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
                 (err, track_id),
