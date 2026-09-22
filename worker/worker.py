@@ -7,6 +7,7 @@ from search import serve as serve_search_api
 from yt_dlp.utils import DownloadError
 
 import wireguard as manager
+from progress import clear_download_progress
 
 import re
 import urllib.request
@@ -175,10 +176,7 @@ def download(row, c, track_id):
                 last_heartbeat = now
 
         elif status == 'finished':
-            c.execute(
-                'UPDATE tracks SET progress=99,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
-                (track_id,),
-            )
+            clear_download_progress(c, track_id)
             c.commit()
             heartbeat(c, 'postprocessing:' + track_id)
 
