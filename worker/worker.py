@@ -30,29 +30,74 @@ def is_nhaccuatui(url):
         return False
 
 def resolve_nhaccuatui(url):
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, timeout=20) as r:
+    """Resolve a NhacCuaTui page to its playable audio URL."""
+    req = urllib.request.Request(
+        url,
+        headers={
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+                          '(KHTML, like Gecko) Chrome/131.0 Safari/537.36',
+            'Referer': 'https://www.nhaccuatui.com/',
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
         html = r.read().decode('utf-8', errors='ignore')
-    match = re.search(r'player\.peConfig\.xmlURL\s*=\s*"([^"]+)"', html)
-    if not match:
-        raise RuntimeError('NhacCuaTui: player XML URL not found')
-    xml_url = match.group(1).replace('\\/', '/')
-    req = urllib.request.Request(xml_url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, timeout=20) as r:
+        final_url = r.geturl()
+
+    # NCT has used both the legacy peConfig XML player and embedded
+    # player configuration. Try the known XML reference forms first.
+    xml_match = (
+        re.search(r'player\\.peConfig\\.xmlURL\\s*=\\s*["\\']([^"\\']+)["\\']', html)
+        or re.search(r'xmlURL\\s*[:=]\\s*["\\']([^"\\']+)["\\']', html)
+        or re.search(r'\\bxmlURL\\b\\s*=\\s*["\\']([^"\\']+)["\\']', html)
+    )
+    if not xml_match:
+        raise RuntimeError(
+            f'NhacCuaTui: player XML URL not found (page={final_url}, '
+            f'html_bytes={len(html.encode("utf-8"))})'
+        )
+
+    xml_url = xml_match.group(1)
+    xml_url = xml_url.replace('\\\\/', '/').replace('\\/', '/')
+    if xml_url.startswith('//'):
+        xml_url = 'https:' + xml_url
+    elif xml_url.startswith('/'):
+        from urllib.parse import urljoin
+        xml_url = urljoin(final_url, xml_url)
+
+    xml_req = urllib.request.Request(
+        xml_url,
+        headers={
+            'User-Agent': 'Mozilla/5.0',
+            'Referer': final_url,
+            'Accept': 'application/xml,text/xml,*/*',
+        },
+    )
+    with urllib.request.urlopen(xml_req, timeout=30) as r:
         xml_data = r.read()
-    root = ET.fromstring(xml_data)
+
+    try:
+        root = ET.fromstring(xml_data)
+    except ET.ParseError as exc:
+        raise RuntimeError(
+            f'NhacCuaTui: invalid player XML ({len(xml_data)} bytes)'
+        ) from exc
+
     tracks = root.findall('.//track')
     if not tracks:
-        raise RuntimeError('NhacCuaTui: no track found in XML')
+        raise RuntimeError('NhacCuaTui: no track found in player XML')
+
     track = tracks[0]
+
     def value(name):
         node = track.find(name)
-        return (node.text or '').strip() if node is not None else ''
-    direct = value('location')
+        return (node.text or '').strip() if node is not None and node.text else ''
+
+    direct = value('location') or value('locationHQ') or value('locationHQ2')
     title = value('title') or url.rstrip('/').split('/')[-1].split('.')[0]
     if not direct:
-        raise RuntimeError('NhacCuaTui: direct audio URL not found')
-    return {'url': direct, 'title': title}
+        raise RuntimeError('NhacCuaTui: direct audio URL not found in player XML')
+
+    return {'url': direct, 'title': title, 'page_url': final_url, 'xml_url': xml_url}
 
 
 DB_PATH = os.getenv('DB_PATH', '/state/app.db')
@@ -176,26 +221,77 @@ def download_nhaccuatui(row, c, track_id):
     folder = Path(MUSIC_DIR) / custom_folder if custom_folder else Path(MUSIC_DIR) / artist / album
     folder.mkdir(parents=True, exist_ok=True)
     output = folder / f'{title}.mp3'
-    req = urllib.request.Request(resolved['url'], headers={'User-Agent': 'Mozilla/5.0',
-                                                            'Referer': row['source_url']})
-    with urllib.request.urlopen(req, timeout=30) as response, open(output, 'wb') as fp:
-        total = int(response.headers.get('Content-Length') or 0)
-        downloaded = 0
-        last_update = 0.0
-        while True:
-            chunk = response.read(1024 * 256)
-            if not chunk:
-                break
-            fp.write(chunk)
-            downloaded += len(chunk)
-            now = time.time()
-            if now - last_update >= 1:
-                percent = int(downloaded * 100 / total) if total else 1
-                c.execute('UPDATE tracks SET progress=?,downloaded_bytes=?,total_bytes=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
-                          (max(1, min(99, percent)), downloaded, total, track_id))
-                c.commit()
-                heartbeat(c, 'downloading:' + track_id)
-                last_update = now
+    temp = output.with_suffix('.mp3.part')
+
+    debug = [
+        {'step': 'nct_resolve', 'page_url': resolved.get('page_url', row['source_url']),
+         'xml_url': resolved.get('xml_url', ''), 'title': resolved.get('title', '')}
+    ]
+    req = urllib.request.Request(
+        resolved['url'],
+        headers={
+            'User-Agent': 'Mozilla/5.0',
+            'Referer': resolved.get('page_url') or row['source_url'],
+            'Accept': 'audio/mpeg,audio/*;q=0.9,*/*;q=0.5',
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as response, open(temp, 'wb') as fp:
+            status = getattr(response, 'status', None)
+            content_type = (response.headers.get('Content-Type') or '').lower()
+            total = int(response.headers.get('Content-Length') or 0)
+            downloaded = 0
+            last_update = 0.0
+            debug.append({
+                'step': 'nct_stream',
+                'status': 'http_ok',
+                'http_status': status,
+                'content_type': content_type,
+                'content_length': total,
+            })
+            while True:
+                chunk = response.read(256 * 1024)
+                if not chunk:
+                    break
+                fp.write(chunk)
+                downloaded += len(chunk)
+                now = time.time()
+                if now - last_update >= 1:
+                    percent = int(downloaded * 100 / total) if total else 1
+                    c.execute(
+                        'UPDATE tracks SET progress=?,downloaded_bytes=?,total_bytes=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
+                        (max(1, min(99, percent)), downloaded, total, track_id),
+                    )
+                    c.commit()
+                    heartbeat(c, 'downloading:' + track_id)
+                    last_update = now
+
+        if downloaded < 10240:
+            raise RuntimeError(
+                'NhacCuaTui audio response is unexpectedly small '
+                f'({downloaded} bytes). Diagnostics: {debug}'
+            )
+
+        with open(temp, 'rb') as fp:
+            header = fp.read(16)
+        if not (
+            header.startswith(b'ID3')
+            or header[:2] in (b'\\xff\\xfb', b'\\xff\\xf3', b'\\xff\\xf2')
+        ):
+            # A proxy/error page returned with HTTP 200 is a common failure
+            # mode for direct NCT URLs. Do not publish it as an .mp3.
+            raise RuntimeError(
+                'NhacCuaTui response does not look like MP3 audio. '
+                f'content_type={content_type!r}, header={header[:16]!r}, diagnostics={debug}'
+            )
+
+        temp.replace(output)
+    except Exception:
+        try:
+            temp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 def download_zingmp3(row, c, track_id):
     Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
