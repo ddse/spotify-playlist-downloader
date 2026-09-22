@@ -11,13 +11,13 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: ["**"]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Every push to main and every PR targeting main gets its own CI run.
+# Every push and every PR targeting main gets its own CI run.
 # Do not cancel an in-flight run when another commit is pushed: each commit
 # must be independently validated before it can be considered mergeable.
 concurrency:
@@ -49,6 +49,8 @@ jobs:
 
       - name: Python automation tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Download output resolution tests
+        run: python -m pytest -q tests/test_download_output.py
       - name: Provider pytest suite
         run: python -m pytest -q
       - name: Zing MP3 live integration - search
@@ -62,6 +64,9 @@ jobs:
         run: |
           npm install
           npm run build
+
+      - name: Prepare CI environment
+        run: touch .env
 
       - name: Docker Compose validation
         run: docker compose config
