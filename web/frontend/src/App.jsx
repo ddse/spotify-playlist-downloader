@@ -51,7 +51,69 @@ function App(){const [tab,setTab]=useState('downloading'),[showSettings,setShowS
  </section>}
  <section className="mt-8"><div className="grid grid-cols-3 gap-3">{[['downloading',Download,stats.queue,'Queue'],['completed',CheckCircle2,stats.done,'Completed'],['subscriptions',ListMusic,stats.subs,'Subscriptions']].map(([id,I,n,label])=><button key={id} onClick={()=>setTab(id)} className={cn('rounded-2xl border p-4 text-left transition',tab===id?'border-violet-500/40 bg-violet-500/10':'border-white/5 bg-white/[.02] hover:bg-white/[.05]')}><div className="flex items-center justify-between"><I size={18} className="text-violet-300"/><span className="text-2xl font-bold">{n}</span></div><div className="mt-2 text-sm text-zinc-400">{label}</div></button>)}</div></section>
  {tab==='downloading'&&<section className="glass mt-4 overflow-hidden rounded-2xl"><Toolbar title="Downloading" icon={Download} count={queue.length} onRefresh={load} actions={<><Btn onClick={()=>selectAll(queue.map(x=>x.spotify_id))} disabled={!queue.length}><CheckSquare size={15}/> Select all</Btn><Btn onClick={clearSelection} disabled={!selected.length}><Square size={15}/> Clear</Btn><Btn onClick={()=>bulk('clear_selected')} disabled={!selected.length}><Trash2 size={15}/> Cancel selected</Btn><Btn onClick={()=>bulk('download_selected')} disabled={!selected.length}><Download size={15}/> Download selected</Btn></>}/><div className="scrollbar overflow-x-auto"><div className="grid min-w-[900px] grid-cols-[34px_2fr_100px_1.3fr_1.5fr_220px] gap-3 border-b border-white/5 bg-black/10 px-4 py-2 text-xs uppercase tracking-wide text-zinc-500"><div></div><div>Video</div><div>Status</div><div>Format</div><div>Progress / Speed</div><div>Actions</div></div>{queue.map(x=><QueueRow key={x.spotify_id} x={x} selected={sel.has(x.spotify_id)} onSelect={v=>setSel(s=>{const n=new Set(s);v?n.add(x.spotify_id):n.delete(x.spotify_id);return n})} onLoad={load}/>)}</div></section>}
- {tab==='completed'&&<section className="glass mt-4 overflow-hidden rounded-2xl"><Toolbar title="Completed" icon={CheckCircle2} count={data.history.length} onRefresh={load} actions={<><Btn onClick={()=>selectAll(data.history.map(x=>x.spotify_id))} disabled={!data.history.length}><CheckSquare size={15}/> Select all</Btn><Btn onClick={clearSelection} disabled={!selected.length}><Square size={15}/> Clear</Btn><Btn onClick={()=>bulk('clear_selected')} disabled={!selected.length}><Trash2 size={15}/> Clear selected</Btn><Btn danger onClick={()=>{if(confirm('Remove selected downloads and their local files?'))bulk('remove_selected')}} disabled={!selected.length}><Trash2 size={15}/> Remove files</Btn><Btn onClick={()=>bulk('clear_completed')}><CheckCircle2 size={15}/> Clear completed</Btn><Btn onClick={()=>bulk('clear_failed')}><Trash2 size={15}/> Clear failed</Btn><Btn onClick={()=>bulk('retry_failed')}><RotateCcw size={15}/> Retry failed</Btn></>}/><div className="scrollbar overflow-x-auto">{data.history.map(x=><div key={x.spotify_id} className="grid min-w-[900px] grid-cols-[34px_2fr_100px_1.5fr_110px_160px_300px] items-center gap-3 border-b border-white/5 px-4 py-3"><input type="checkbox" checked={sel.has(x.spotify_id)} onChange={e=>setSel(s=>{const n=new Set(s);e.target.checked?n.add(x.spotify_id):n.delete(x.spotify_id);return n})}/><div><div className="truncate font-medium">{x.title}</div><div className="text-xs text-zinc-500">{x.artists}</div></div><Badge tone={x.status==='failed'?'red':'green'}>{x.status}</Badge><div className="text-xs text-zinc-400">{x.download_quality||'best'} / {x.video_codec&&x.video_codec!=='auto'?x.video_codec+' / ':''}{x.download_format||''}</div><div className="text-xs">{bytes(x.total_bytes)}</div><div className="text-xs text-zinc-500">{x.updated_at}</div><div className="flex flex-wrap gap-1.5 whitespace-nowrap">{x.status==='completed'&&<><a href={"/api/files/"+encodeURIComponent(x.spotify_id)+"?download=1"}><Btn><Download size={14}/> Download</Btn></a><a href={"/api/files/"+encodeURIComponent(x.spotify_id)+"?download=0"} target="_blank" rel="noreferrer"><Btn><Play size={14}/> Play</Btn></a></>}{x.status!=='completed'&&x.source_url&&<a href={x.source_url} target="_blank" rel="noreferrer"><Btn><ExternalLink size={14}/> Source</Btn></a>}<Btn onClick={async()=>{await api('/api/retry/'+encodeURIComponent(x.spotify_id),{method:'POST'});load()}}><RotateCcw size={14}/></Btn>{x.status==='completed'&&<Btn danger onClick={async()=>{if(!confirm('Remove this download and its local file?'))return;await api('/api/files/'+encodeURIComponent(x.spotify_id),{method:'DELETE'});load()}}><Trash2 size={14}/> Remove</Btn></div></div>)}</div></section>}
+  {tab==='completed'&&(
+    <section className="glass mt-4 overflow-hidden rounded-2xl">
+      <Toolbar
+        title="Completed"
+        icon={CheckCircle2}
+        count={data.history.length}
+        onRefresh={load}
+        actions={
+          <>
+            <Btn onClick={()=>selectAll(data.history.map(x=>x.spotify_id))} disabled={!data.history.length}><CheckSquare size={15}/> Select all</Btn>
+            <Btn onClick={clearSelection} disabled={!selected.length}><Square size={15}/> Clear</Btn>
+            <Btn onClick={()=>bulk('clear_selected')} disabled={!selected.length}><Trash2 size={15}/> Clear selected</Btn>
+            <Btn danger onClick={()=>{if(confirm('Remove selected downloads and their local files?')) bulk('remove_selected')}} disabled={!selected.length}><Trash2 size={15}/> Remove files</Btn>
+            <Btn onClick={()=>bulk('clear_completed')}><CheckCircle2 size={15}/> Clear completed</Btn>
+            <Btn onClick={()=>bulk('clear_failed')}><Trash2 size={15}/> Clear failed</Btn>
+            <Btn onClick={()=>bulk('retry_failed')}><RotateCcw size={15}/> Retry failed</Btn>
+          </>
+        }
+      />
+      <div className="scrollbar overflow-x-auto">
+        {data.history.map(x=>(
+          <div key={x.spotify_id} className="grid min-w-[900px] grid-cols-[34px_2fr_100px_1.5fr_110px_160px_300px] items-center gap-3 border-b border-white/5 px-4 py-3">
+            <input
+              type="checkbox"
+              checked={sel.has(x.spotify_id)}
+              onChange={e=>setSel(s=>{
+                const n=new Set(s);
+                e.target.checked ? n.add(x.spotify_id) : n.delete(x.spotify_id);
+                return n;
+              })}
+            />
+            <div>
+              <div className="truncate font-medium">{x.title}</div>
+              <div className="text-xs text-zinc-500">{x.artists}</div>
+            </div>
+            <Badge tone={x.status==='failed'?'red':'green'}>{x.status}</Badge>
+            <div className="text-xs text-zinc-400">{x.download_quality||'best'} / {x.video_codec&&x.video_codec!=='auto'?x.video_codec+' / ':''}{x.download_format||''}</div>
+            <div className="text-xs">{bytes(x.total_bytes)}</div>
+            <div className="text-xs text-zinc-500">{x.updated_at}</div>
+            <div className="flex flex-wrap gap-1.5 whitespace-nowrap">
+              {x.status==='completed' && (
+                <>
+                  <a href={"/api/files/"+encodeURIComponent(x.spotify_id)+"?download=1"}><Btn><Download size={14}/> Download</Btn></a>
+                  <a href={"/api/files/"+encodeURIComponent(x.spotify_id)+"?download=0"} target="_blank" rel="noreferrer"><Btn><Play size={14}/> Play</Btn></a>
+                </>
+              )}
+              {x.status!=='completed' && x.source_url && (
+                <a href={x.source_url} target="_blank" rel="noreferrer"><Btn><ExternalLink size={14}/> Source</Btn></a>
+              )}
+              <Btn onClick={async()=>{await api('/api/retry/'+encodeURIComponent(x.spotify_id),{method:'POST'});load()}}><RotateCcw size={14}/></Btn>
+              {x.status==='completed' && (
+                <Btn danger onClick={async()=>{
+                  if(!confirm('Remove this download and its local file?')) return;
+                  await api('/api/files/'+encodeURIComponent(x.spotify_id),{method:'DELETE'});
+                  load();
+                }}><Trash2 size={14}/> Remove</Btn>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )}
  {tab==='subscriptions'&&<section className="glass mt-4 overflow-hidden rounded-2xl"><Toolbar title="Subscriptions" icon={ListMusic} count={data.playlists.length} onRefresh={load} actions={<><Btn onClick={()=>selectAll(data.playlists.map(x=>x.spotify_id))} disabled={!data.playlists.length}><CheckSquare size={15}/> Select all</Btn><Btn onClick={clearSelection} disabled={!selected.length}><Square size={15}/> Clear</Btn><Btn onClick={async()=>{for(const p of data.playlists)if(p.enabled)await api('/api/playlists/'+encodeURIComponent(p.spotify_id)+'/sync-manual',{method:'POST'});load()}}><RefreshCw size={15}/> Check all now</Btn><Btn onClick={async()=>{for(const id of selected)await api('/api/playlists/'+encodeURIComponent(id)+'/sync-manual',{method:'POST'});load()} } disabled={!selected.length}><RefreshCw size={15}/> Check selected</Btn><Btn danger onClick={async()=>{for(const id of selected)await api('/api/playlists/'+encodeURIComponent(id),{method:'DELETE'});setSel(new Set());load()}} disabled={!selected.length}><Trash2 size={15}/> Delete selected</Btn></>}/><div>{data.playlists.map(p=><div key={p.spotify_id} className="flex flex-wrap items-center gap-4 border-b border-white/5 px-4 py-4"><input type="checkbox" checked={sel.has(p.spotify_id)} onChange={e=>setSel(s=>{const n=new Set(s);e.target.checked?n.add(p.spotify_id):n.delete(p.spotify_id);return n})}/><div className="min-w-[260px] flex-1"><div className="font-medium">{p.name}</div><div className="text-xs text-zinc-500">{p.url}</div></div><a href={p.url} target="_blank" rel="noreferrer"><Btn><ExternalLink size={14}/> Open</Btn></a><Badge tone={p.enabled?'green':'red'}>{p.enabled?'enabled':'disabled'}</Badge><span className="text-xs text-zinc-500">Last sync: {p.last_sync||'never'}</span><Btn onClick={async()=>{await api('/api/playlists/'+encodeURIComponent(p.spotify_id)+'/sync-manual',{method:'POST'});load()}}><RefreshCw size={14}/></Btn></div>)}</div></section>}
  </div></>}
 function Toolbar({title:Title,icon:Icon,count,onRefresh,actions}){return <div className="flex flex-wrap items-center gap-3 border-b border-white/10 p-4"><div className="flex items-center gap-2 mr-2"><Icon size={18} className="text-violet-300"/><span className="font-semibold">{Title}</span><Badge>{count}</Badge></div>{actions}<div className="ml-auto"><Btn onClick={onRefresh}><RefreshCw size={15}/></Btn></div></div>}
