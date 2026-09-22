@@ -61,6 +61,39 @@ def run(enabled, func):
 def run_download(enabled, func):
     return run(enabled, func)
 
+def debug_status():
+    """Lightweight WireGuard diagnostics for search/debug flows."""
+    try:
+        current = status()
+        return {
+            "requested_enabled": bool(_state),
+            "interface": current.get("interface", INTERFACE),
+            "config_exists": bool(current.get("config_exists")),
+            "interface_up": current.get("status") != "disconnected",
+            "route_active": bool(current.get("route_active")),
+            "handshake_recent": bool(current.get("handshake_recent")),
+            "vpn_route": bool(current.get("vpn_route")),
+            "status": current.get("status"),
+            "status_detail": current.get("status_detail", ""),
+            "public_ip": current.get("public_ip", ""),
+            "peer_count": int(current.get("peer_count", 0)),
+        }
+    except Exception as exc:
+        return {
+            "requested_enabled": bool(_state),
+            "interface": INTERFACE,
+            "config_exists": os.path.isfile(CONFIG),
+            "interface_up": False,
+            "route_active": False,
+            "handshake_recent": False,
+            "vpn_route": False,
+            "status": "error",
+            "status_detail": f"{type(exc).__name__}: {exc}",
+            "public_ip": "",
+            "peer_count": 0,
+        }
+
+
 
 def _public_ip():
     try:
