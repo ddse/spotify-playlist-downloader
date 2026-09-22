@@ -4,6 +4,7 @@ import json
 import re
 import urllib.parse
 import requests
+import time
 
 
 DOMAIN = "https://zingmp3.vn"
@@ -71,14 +72,35 @@ def _initialize(session):
         raise ZingMp3Error("Zing MP3 session cookie zmp3_rqid was not created")
 
 
-def _api(session, path, params):
+def _api(session, path, params, debug=None):
     _initialize(session)
-    response = session.get(build_api_url(path, params), timeout=TIMEOUT)
+    url = build_api_url(path, params)
+    started = time.time()
+    response = session.get(url, timeout=TIMEOUT)
+    if debug is not None:
+        debug.append({
+            "step": "zing_http",
+            "status": "ok" if response.ok else "error",
+            "path": path,
+            "http_status": response.status_code,
+            "content_type": response.headers.get("Content-Type", ""),
+            "content_length": len(response.content),
+            "duration_ms": round((time.time() - started) * 1000),
+            "cookie_created": bool(session.cookies.get("zmp3_rqid")),
+        })
     response.raise_for_status()
     try:
         data = response.json()
     except ValueError as exc:
         raise ZingMp3Error("Zing MP3 returned invalid JSON") from exc
+    if debug is not None:
+        debug.append({
+            "step": "zing_json",
+            "status": "ok" if data.get("err") == 0 else "error",
+            "err": data.get("err"),
+            "msg": data.get("msg") or "",
+            "has_data": bool(data.get("data")),
+        })
     if data.get("err") != 0:
         raise ZingMp3Error(
             f"Zing MP3 API error {data.get('err')}: {data.get('msg') or 'unknown error'}"
@@ -158,7 +180,7 @@ def _normalize(data, limit, page):
     }
 
 
-def search(query, page=1, limit=10):
+def search(query, page=1, limit=10, debug=False):
     page = max(1, int(page))
     limit = max(1, min(int(limit), PAGE_SIZE))
     query = str(query or "").strip()
@@ -166,11 +188,21 @@ def search(query, page=1, limit=10):
         return {"items": [], "page": page, "limit": limit, "has_more": False}
 
     session = _session()
+    debug_steps = [] if debug else None
     data = _api(session, "/api/v2/search/multi", {
         "q": query,
         "allowCorrect": "1",
-    })
-    return _normalize(data, limit, page)
+    }, debug=debug_steps)
+    result = _normalize(data, limit, page)
+    if debug:
+        result["_provider_debug"] = {
+            "provider": "zingmp3",
+            "domain": DOMAIN,
+            "api_path": "/api/v2/search/multi",
+            "steps": debug_steps,
+            "normalized_count": len(result["items"]),
+        }
+    return result
 
 
 def _song_id(source):
