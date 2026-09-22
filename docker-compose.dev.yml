@@ -1,0 +1,78 @@
+services:
+  web:
+    image: spotify-playlist-downloader-web:dev-base
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      target: runtime
+    ports:
+      - "${WEB_PORT:-8088}:8080"
+    environment:
+      TZ: ${TZ:-Asia/Tokyo}
+      DB_PATH: /state/app.db
+      MUSIC_DIR: /music
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+      SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI:-}
+      SYNC_TOKEN: ${SYNC_TOKEN:-}
+      WORKER_ENDPOINT: http://worker:8090
+    depends_on:
+      worker:
+        condition: service_started
+    volumes:
+      - ./web/app.py:/app/app.py
+      - ./web/spotify.py:/app/spotify.py
+      - ./web/youtube.py:/app/youtube.py
+      - ./database.py:/app/database.py
+      - ./web/frontend:/app/frontend
+      - ${MUSIC_DIR:-./music}:/music
+      - ./state:/state
+
+  worker:
+    image: spotify-playlist-downloader-worker:dev-base
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      TZ: ${TZ:-Asia/Tokyo}
+      DB_PATH: /state/app.db
+      MUSIC_DIR: /music
+      AUDIO_FORMAT: ${AUDIO_FORMAT:-mp3}
+      AUDIO_BITRATE: ${AUDIO_BITRATE:-320k}
+      WORKER_SERVICE_NAME: worker
+      WG_CONFIG: /etc/wireguard/wg0.conf
+    volumes:
+      - ./worker:/app
+      - ./database.py:/app/database.py
+      - ${MUSIC_DIR:-./music}:/music
+      - ./state:/state
+      - ./wireguard:/etc/wireguard:ro
+      - /lib/modules:/lib/modules:ro
+    expose:
+      - "8090"
+
+  scheduler:
+    image: spotify-playlist-downloader-worker:dev-base
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    command: ["python", "scheduler.py"]
+    environment:
+      TZ: ${TZ:-Asia/Tokyo}
+      DB_PATH: /state/app.db
+      SYNC_ENDPOINT: http://web:8080
+      SYNC_TOKEN: ${SYNC_TOKEN:-}
+      SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-30}
+    volumes:
+      - ./worker:/app
+      - ./database.py:/app/database.py
+      - ./state:/state
+    depends_on:
+      web:
+        condition: service_started
