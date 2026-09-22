@@ -114,6 +114,17 @@ class Handler(BaseHTTPRequestHandler):
                 "limit": max(1, min(int(limit), PAGE_SIZE)),
                 "has_more": False,
                 "error": f"{type(exc).__name__}: {exc}",
+                **({"debug": {
+                    "request_received": True,
+                    "source": source,
+                    "query": query,
+                    "wireguard_used": use_wireguard,
+                    "steps": [{
+                        "step": "worker_error",
+                        "status": "error",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }],
+                }} if debug else {}),
             })
 
     def do_POST(self):
