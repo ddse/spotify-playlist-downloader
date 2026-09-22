@@ -210,7 +210,7 @@ def test_zingmp3_streaming_error_trace_identifies_endpoint(monkeypatch):
         zing.get_stream_url("SONG1", debug=debug)
         assert False, "expected ZingMp3Error"
     except zing.ZingMp3Error as exc:
-        assert "API -1110" in str(exc)
+        assert "API returned -1110" in str(exc)
         assert "streaming API" in str(exc)
 
     assert any("/api/v2/song/get/streaming" in url for url in calls)
