@@ -202,7 +202,15 @@ def resolve_downloaded_file(row, since=0):
 
     # Last fallback: the newest media in the expected folder. This handles
     # yt-dlp filename sanitization and FFmpeg-generated output names.
-    if since:\n        tree_files = [p for p in music.rglob('*') if p.is_file() and p.suffix.lower() in media_exts]\n        recent_tree = [p for p in tree_files if p.stat().st_mtime >= since - 2]\n        if recent_tree:\n            return str(max(recent_tree, key=lambda p: p.stat().st_mtime).resolve())\n    return str(max(files, key=lambda p: p.stat().st_mtime).resolve())
+    if since:
+        tree_files = [
+            p for p in music.rglob('*')
+            if p.is_file() and p.suffix.lower() in media_exts
+        ]
+        recent_tree = [p for p in tree_files if p.stat().st_mtime >= since - 2]
+        if recent_tree:
+            return str(max(recent_tree, key=lambda p: p.stat().st_mtime).resolve())
+    return str(max(files, key=lambda p: p.stat().st_mtime).resolve())
 
 def format_eta(seconds):
     if seconds is None or seconds < 0:
