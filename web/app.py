@@ -1,4 +1,4 @@
-import os, re, sqlite3, secrets, time, json
+import os, re, sqlite3, secrets, time, json, logging
 from pathlib import Path
 from urllib.parse import urlparse
 import httpx
@@ -10,6 +10,11 @@ from database import db
 from spotify import authorize_url, exchange, access_token, public_search, playlist_items, playlist_info
 from youtube import search as youtube_search
 
+DEBUG_MODE=os.getenv('DEBUG','0').lower() in {'1','true','yes','on','debug'}
+LOG_LEVEL=os.getenv('LOG_LEVEL','DEBUG' if DEBUG_MODE else 'INFO').upper()
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format='%(asctime)s %(levelname)s [web] %(message)s')
+logger=logging.getLogger('web')
+logger.info('Web logging initialized debug=%s log_level=%s', DEBUG_MODE, LOG_LEVEL)
 DB_PATH=os.getenv('DB_PATH','/state/app.db'); SYNC_TOKEN=os.getenv('SYNC_TOKEN','')
 WIREGUARD_ENV_DEFAULT=os.getenv('WIREGUARD_DEFAULT','0') in {'1','true','yes','on'}
 
@@ -63,8 +68,14 @@ def index():
 @app.get('/health')
 async def health(): return {'ok':True}
 
+@app.get('/api/debug')
+async def debug_status():
+    return {'debug': DEBUG_MODE, 'log_level': LOG_LEVEL}
+
+
 @app.get('/api/health')
 async def api_health():
+    logger.debug('Health check requested')
     c=db(); w=worker_state(c,'worker'); s=worker_state(c,'scheduler'); c.close(); return {'ok':True,'spotify_connected':bool(await access_token()),'worker':w,'scheduler':s,'wireguard':wireguard_enabled()}
 
 PROVIDER_DEFAULTS = {
