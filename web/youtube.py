@@ -35,5 +35,8 @@ async def search(query: str, page: int = 1, limit: int = PAGE_SIZE, source: str 
                 "worker_endpoint": WORKER_ENDPOINT,
                 "duration_ms": round((time.time() - started) * 1000),
             }
+            if not response.is_success:
+                payload.setdefault("error", f"Worker search returned HTTP {response.status_code}")
+                return payload
         response.raise_for_status()
         return payload
