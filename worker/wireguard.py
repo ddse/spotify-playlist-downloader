@@ -53,23 +53,29 @@ def setting_enabled():
 
 
 def run(enabled, func):
-    with _lock:
-        set_enabled(bool(enabled))
-        return func()
+    """Run network work without changing the live WireGuard interface.
+
+    WireGuard is a worker/container-wide network setting. The Settings toggle
+    is the only operation allowed to bring the interface up or down. Search
+    and download jobs inherit the current network namespace routing.
+    The legacy ``enabled`` argument is retained for API compatibility.
+    """
+    return func()
 
 
 def run_download(enabled, func):
-    return run(enabled, func)
+    """Run a download without toggling the global WireGuard interface."""
+    return func()
 
 def debug_status():
     """Lightweight WireGuard diagnostics for search/debug flows."""
     try:
         current = status()
         return {
-            "requested_enabled": bool(_state),
+            "requested_enabled": setting_enabled(),
             "interface": current.get("interface", INTERFACE),
             "config_exists": bool(current.get("config_exists")),
-            "interface_up": current.get("status") != "disconnected",
+            "interface_up": bool(current.get("enabled")),
             "route_active": bool(current.get("route_active")),
             "handshake_recent": bool(current.get("handshake_recent")),
             "vpn_route": bool(current.get("vpn_route")),
