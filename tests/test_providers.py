@@ -134,3 +134,46 @@ def test_nhaccuatui_parser_supports_current_song_links(monkeypatch):
     result = nct.search("Việt nam quê hương tôi")
     assert len(result["items"]) == 1
     assert result["items"][0]["title"] == "Việt Nam Quê Hương Tôi"
+
+
+def test_zingmp3_search_debug_trace(monkeypatch):
+    zing = load_provider("zingmp3")
+
+    class Response:
+        ok = True
+        status_code = 200
+        headers = {"Content-Type": "application/json"}
+        content = b'{"err":0}'
+        def raise_for_status(self): pass
+        def json(self):
+            return {
+                "err": 0,
+                "data": {
+                    "items": [{
+                        "encodeId": "SONG1",
+                        "title": "Song",
+                        "link": "/bai-hat/song/SONG1.html",
+                        "duration": 100,
+                        "artists": [{"name": "Artist"}],
+                    }]
+                },
+            }
+
+    class Cookies:
+        def get(self, key, default=None):
+            return "test-rqid" if key == "zmp3_rqid" else default
+
+    class Session:
+        def __init__(self):
+            self.cookies = Cookies()
+            self.headers = {}
+        def get(self, url, timeout=30):
+            return Response()
+
+    monkeypatch.setattr(zing.requests, "Session", Session)
+    result = zing.search("Song", debug=True)
+    trace = result["_provider_debug"]
+    assert trace["provider"] == "zingmp3"
+    assert trace["normalized_count"] == 1
+    assert any(step["step"] == "zing_http" for step in trace["steps"])
+    assert any(step["step"] == "zing_json" and step["status"] == "ok" for step in trace["steps"])
