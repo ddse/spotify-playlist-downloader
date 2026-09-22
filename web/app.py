@@ -126,6 +126,7 @@ async def wireguard_settings():
             wg = response.json()
             result.update({
                 'enabled': bool(wg.get('enabled')),
+                'requested_enabled': wireguard_enabled(),
                 'interface': wg.get('interface', 'wg0'),
                 'config_path': wg.get('config_path', os.getenv('WG_CONFIG', '/etc/wireguard/wg0.conf')),
                 'config_exists': bool(wg.get('config_exists')),
@@ -139,7 +140,8 @@ async def wireguard_settings():
                 'send_bytes': int(wg.get('send_bytes', 0)),
                 'peer_count': int(wg.get('peer_count', 0)),
             })
-            result['enabled'] = wireguard_enabled()
+            # `enabled` is the live interface state; persisted preference is separate.
+            result['requested_enabled'] = wireguard_enabled()
     except Exception as e:
         result['detail'] = str(e)
     return result
