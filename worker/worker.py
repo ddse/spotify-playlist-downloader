@@ -14,10 +14,12 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
-LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
+DEBUG_MODE = os.getenv('DEBUG', '0').lower() in {'1', 'true', 'yes', 'on', 'debug'}
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'DEBUG' if DEBUG_MODE else 'INFO').upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO),
                     format='%(asctime)s %(levelname)s [worker] %(message)s')
 logger = logging.getLogger('worker')
+logger.info('Worker logging initialized debug=%s log_level=%s', DEBUG_MODE, LOG_LEVEL)
 
 def is_zingmp3(url):
     try:
