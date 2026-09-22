@@ -55,9 +55,9 @@ def resolve_nhaccuatui(url):
     # NCT has used both the legacy peConfig XML player and embedded
     # player configuration. Try the known XML reference forms first.
     xml_match = (
-        re.search(r'player\\.peConfig\\.xmlURL\\s*=\\s*["\\']([^"\\']+)["\\']', html)
-        or re.search(r'xmlURL\\s*[:=]\\s*["\\']([^"\\']+)["\\']', html)
-        or re.search(r'\\bxmlURL\\b\\s*=\\s*["\\']([^"\\']+)["\\']', html)
+        re.search(r"player\.peConfig\.xmlURL\s*=\s*['\"]([^'\"]+)['\"]", html)
+        or re.search(r"xmlURL\s*[:=]\s*['\"]([^'\"]+)['\"]", html)
+        or re.search(r"\bxmlURL\b\s*=\s*['\"]([^'\"]+)['\"]", html)
     )
     if not xml_match:
         raise RuntimeError(
@@ -67,7 +67,7 @@ def resolve_nhaccuatui(url):
 
     xml_url = xml_match.group(1)
     logger.debug('NCT XML URL found=%s', xml_url)
-    xml_url = xml_url.replace('\\\\/', '/').replace('\\/', '/')
+    xml_url = xml_url.replace('\\/', '/')
     if xml_url.startswith('//'):
         xml_url = 'https:' + xml_url
     elif xml_url.startswith('/'):
