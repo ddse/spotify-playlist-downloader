@@ -115,7 +115,7 @@ def debug_status():
         return {
             "requested_enabled": bool(_state),
             "interface": INTERFACE,
-            "config_exists": os.path.isfile(CONFIG),
+            "config_exists": os.path.isfile(CONFIG) or is_up(),
             "interface_up": False,
             "route_active": False,
             "handshake_recent": False,
@@ -210,8 +210,10 @@ def status():
             status = "connecting"
             status_detail = "Interface is up; waiting for WireGuard routing"
         elif not handshake_recent:
-            status = "routing"
-            status_detail = "Route is active; no recent peer handshake"
+            # An active route without a recent handshake is not an established VPN.
+            # Keep the UI in the connection phase until the peer has handshaken.
+            status = "connecting"
+            status_detail = "Route is active; waiting for a recent peer handshake"
         elif not public_ip:
             status = "connecting"
             status_detail = "Tunnel handshake is recent; waiting for public IP detection"
@@ -235,7 +237,8 @@ def status():
             "enabled": up,
             "interface": INTERFACE,
             "config_path": CONFIG,
-            "config_exists": os.path.isfile(CONFIG),
+            "config_source": "file" if os.path.isfile(CONFIG) else ("live_interface" if up else "missing"),
+            "config_exists": os.path.isfile(CONFIG) or up,
             "route_active": route_active,
             "handshake_recent": handshake_recent,
             "vpn_route": vpn_route,

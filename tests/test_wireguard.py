@@ -71,6 +71,38 @@ class WireGuardManagerTests(unittest.TestCase):
         self.wireguard._state = False
         self.tmp.cleanup()
 
+
+    def test_run_does_not_toggle_global_interface(self):
+        with patch.object(self.wireguard, "set_enabled") as set_enabled:
+            result = self.wireguard.run(True, lambda: "ok")
+        self.assertEqual(result, "ok")
+        set_enabled.assert_not_called()
+
+    def test_run_download_does_not_toggle_global_interface(self):
+        with patch.object(self.wireguard, "set_enabled") as set_enabled:
+            result = self.wireguard.run_download(True, lambda: "ok")
+        self.assertEqual(result, "ok")
+        set_enabled.assert_not_called()
+
+    def test_status_config_exists_when_live_interface_has_no_config_file(self):
+        with patch.object(self.wireguard, "is_up", return_value=True),              patch.object(self.wireguard.os.path, "isfile", return_value=False),              patch.object(self.wireguard, "_route_status", return_value=(False, [])),              patch.object(self.wireguard, "_handshake_status", return_value=(False, [])),              patch.object(self.wireguard, "_public_ip", return_value=""):
+            result = self.wireguard.status()
+        self.assertTrue(result["enabled"])
+        self.assertTrue(result["config_exists"])
+        self.assertEqual(result["config_source"], "live_interface")
+
+    def test_debug_status_handles_status_exception_without_undefined_variable(self):
+        with patch.object(self.wireguard, "status", side_effect=RuntimeError("boom")),              patch.object(self.wireguard, "is_up", return_value=True):
+            result = self.wireguard.debug_status()
+        self.assertEqual(result["status"], "error")
+        self.assertTrue(result["config_exists"])
+        self.assertFalse(result["interface_up"])
+
+    def test_apply_enabled_async_rejects_duplicate_transition(self):
+        self.wireguard._operation = "connecting"
+        self.assertFalse(self.wireguard.apply_enabled_async(False))
+        self.wireguard._operation = None
+
     def test_enable_runs_wg_quick_up_only_when_down(self):
         with patch.object(
             self.wireguard, "is_up", side_effect=[False, True]
@@ -202,8 +234,8 @@ class WireGuardManagerTests(unittest.TestCase):
         self.assertTrue(result["route_active"])
         self.assertFalse(result["handshake_recent"])
         self.assertFalse(result["vpn_route"])
-        self.assertEqual(result["status"], "routing")
-        self.assertIn("no recent peer handshake", result["status_detail"])
+        self.assertEqual(result["status"], "connecting")
+        self.assertIn("waiting for a recent peer handshake", result["status_detail"])
 
     def test_status_reports_disconnected_when_interface_is_down(self):
         with patch.object(self.wireguard, "is_up", return_value=False):

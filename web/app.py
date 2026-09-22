@@ -1,4 +1,4 @@
-import os, re, sqlite3, secrets, time, json
+import os, re, sqlite3, secrets, time, json, logging
 from pathlib import Path
 from urllib.parse import urlparse
 import httpx
@@ -10,6 +10,11 @@ from database import db
 from spotify import authorize_url, exchange, access_token, public_search, playlist_items, playlist_info
 from youtube import search as youtube_search
 
+DEBUG_MODE=os.getenv('DEBUG','0').lower() in {'1','true','yes','on','debug'}
+LOG_LEVEL='DEBUG' if DEBUG_MODE else os.getenv('LOG_LEVEL','INFO').upper()
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format='%(asctime)s %(levelname)s [web] %(message)s')
+logger=logging.getLogger('web')
+logger.info('Web logging initialized debug=%s log_level=%s', DEBUG_MODE, LOG_LEVEL)
 DB_PATH=os.getenv('DB_PATH','/state/app.db'); SYNC_TOKEN=os.getenv('SYNC_TOKEN','')
 WIREGUARD_ENV_DEFAULT=os.getenv('WIREGUARD_DEFAULT','0') in {'1','true','yes','on'}
 
@@ -63,8 +68,14 @@ def index():
 @app.get('/health')
 async def health(): return {'ok':True}
 
+@app.get('/api/debug')
+async def debug_status():
+    return {'debug': DEBUG_MODE, 'log_level': LOG_LEVEL}
+
+
 @app.get('/api/health')
 async def api_health():
+    logger.debug('Health check requested')
     c=db(); w=worker_state(c,'worker'); s=worker_state(c,'scheduler'); c.close(); return {'ok':True,'spotify_connected':bool(await access_token()),'worker':w,'scheduler':s,'wireguard':wireguard_enabled()}
 
 PROVIDER_DEFAULTS = {
@@ -179,7 +190,13 @@ async def wireguard_toggle(enabled: bool = Form(...)):
             # `enabled` remains the live interface state returned by worker.
             return result
     except Exception as e:
-        return {'enabled': False, 'requested_enabled': enabled, 'status': 'unavailable', 'error': str(e)}
+        return {
+            'enabled': False,
+            'requested_enabled': enabled,
+            'status': 'connecting' if enabled else 'unavailable',
+            'status_detail': 'WireGuard transition is still in progress; worker status is temporarily unavailable.' if enabled else '',
+            'error': str(e),
+        }
 
 
 @app.get('/api/settings/connections')
@@ -432,11 +449,24 @@ def import_youtube(source_url:str=Form(...),source_mode:str=Form('playlist'),dow
 
 @app.post('/api/queue/bulk')
 def queue_bulk(action:str=Form(...),ids:str=Form('')):
-    valid={'clear_selected','clear_completed','clear_failed','retry_failed','download_selected'}
+    valid={'clear_selected','clear_completed','clear_failed','retry_failed','download_selected','remove_selected'}
     if action not in valid: raise HTTPException(400,'invalid action')
     selected=[x for x in ids.split(',') if x]
     c=db()
     if action == 'clear_selected' and selected:
+        c.executemany("DELETE FROM tracks WHERE spotify_id=?",( (x,) for x in selected ))
+    elif action == 'remove_selected' and selected:
+        rows=c.execute("SELECT spotify_id,file_path,status FROM tracks WHERE spotify_id=?".replace("spotify_id=?","spotify_id IN (%s)" % ",".join("?"*len(selected))), tuple(selected)).fetchall()
+        music=Path(os.getenv('MUSIC_DIR','/music')).resolve()
+        for row in rows:
+            path_value=(row['file_path'] or '').strip()
+            if path_value:
+                try:
+                    p=Path(path_value).resolve()
+                    if p.is_file() and music in p.parents:
+                        p.unlink()
+                except OSError:
+                    pass
         c.executemany("DELETE FROM tracks WHERE spotify_id=?",( (x,) for x in selected ))
     elif action == 'clear_completed':
         c.execute("DELETE FROM tracks WHERE status='completed'")
@@ -447,6 +477,27 @@ def queue_bulk(action:str=Form(...),ids:str=Form('')):
     elif action == 'download_selected' and selected:
         c.executemany("UPDATE tracks SET status='queued',progress=0,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status='completed'",((x,) for x in selected))
     c.commit(); c.close()
+    return {'ok':True}
+
+@app.delete('/api/files/{track_id}')
+def remove_file(track_id:str):
+    c=db()
+    row=c.execute("SELECT * FROM tracks WHERE spotify_id=?", (track_id,)).fetchone()
+    if not row:
+        c.close()
+        raise HTTPException(404, 'track not found')
+    music=Path(os.getenv('MUSIC_DIR','/music')).resolve()
+    path_value=(row['file_path'] or '').strip() if 'file_path' in row.keys() else ''
+    if path_value:
+        try:
+            p=Path(path_value).resolve()
+            if p.is_file() and music in p.parents:
+                p.unlink()
+        except OSError:
+            pass
+    c.execute("DELETE FROM tracks WHERE spotify_id=?", (track_id,))
+    c.commit()
+    c.close()
     return {'ok':True}
 
 @app.post('/api/retry/{track_id}')
@@ -506,26 +557,46 @@ def history():
 
 @app.get('/api/files/{track_id}')
 def download_file(track_id:str, download:bool=Query(False)):
-    c=db(); row=c.execute('SELECT * FROM tracks WHERE spotify_id=? AND status=\'completed\'',(track_id,)).fetchone(); c.close()
-    if not row: raise HTTPException(404,'completed file not found')
-    music=Path(os.getenv('MUSIC_DIR','/music')).resolve()
-    artist=(row['artists'] or 'Unknown Artist').replace('/','_')
-    album=(row['album'] or 'YouTube').replace('/','_')
-    title=(row['title'] or 'Unknown Title').replace('/','_')
-    custom=(row['download_folder'] or '').strip()
-    folder=(music / custom) if custom else (music / artist / album)
-    folder=folder.resolve()
-    if music not in folder.parents and folder != music: raise HTTPException(400,'invalid download folder')
-    preferred=[]
-    fmt=(row['download_format'] or '').lower()
-    if fmt in {'mp3','m4a','opus','wav','flac','mp4'}: preferred.append(fmt)
-    preferred += ['mp3','m4a','opus','flac','wav','mp4','webm','mkv','mov']
-    for ext in dict.fromkeys(preferred):
-        p=folder / f'{title}.{ext}'
-        if p.is_file(): return FileResponse(p, filename=p.name, content_disposition_type='attachment' if download else 'inline')
-    matches=sorted(folder.glob(f'{title}.*'), key=lambda p:p.stat().st_mtime, reverse=True)
-    for p in matches:
-        if p.is_file() and p.suffix.lower() not in {'.jpg','.jpeg','.png','.webp','.vtt','.srt','.ass','.lrc'}:
-            return FileResponse(p, filename=p.name, content_disposition_type='attachment' if download else 'inline')
-    raise HTTPException(404,'completed file not found')
+    c=db()
+    row=c.execute("SELECT * FROM tracks WHERE spotify_id=? AND status='completed'", (track_id,)).fetchone()
+    c.close()
+    if not row:
+        raise HTTPException(404, 'completed file not found')
+
+    music = Path(os.getenv('MUSIC_DIR', '/music')).resolve()
+    path_value = (row['file_path'] or '').strip() if 'file_path' in row.keys() else ''
+    candidates = [Path(path_value)] if path_value else []
+
+    artist = (row['artists'] or 'Unknown Artist').replace('/', '_')
+    album = (row['album'] or 'YouTube').replace('/', '_')
+    title = (row['title'] or 'Unknown Title').replace('/', '_')
+    custom = (row['download_folder'] or '').strip()
+    folder = (music / custom) if custom else (music / artist / album)
+    folder = folder.resolve()
+    if music not in folder.parents and folder != music:
+        raise HTTPException(400, 'invalid download folder')
+
+    candidates.extend(folder.glob(f'{title}.*'))
+    if folder.exists():
+        candidates.extend(folder.rglob('*'))
+
+    excluded = {'.jpg', '.jpeg', '.png', '.webp', '.vtt', '.srt', '.ass', '.lrc', '.part', '.ytdl'}
+    seen = set()
+    for p in candidates:
+        try:
+            p = p.resolve()
+        except OSError:
+            continue
+        if str(p) in seen or not p.is_file() or p.suffix.lower() in excluded:
+            continue
+        seen.add(str(p))
+        if music not in p.parents:
+            continue
+        return FileResponse(
+            p,
+            filename=p.name,
+            content_disposition_type='attachment' if download else 'inline',
+        )
+
+    raise HTTPException(404, 'completed file not found')
 

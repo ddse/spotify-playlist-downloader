@@ -27,6 +27,7 @@ TRACK_BASE_COLUMNS = {
     'download_speed': "TEXT DEFAULT ''",
     'eta': "TEXT DEFAULT ''",
     'wireguard': 'INTEGER DEFAULT 0',
+    'file_path': "TEXT DEFAULT ''",
 }
 
 
@@ -71,7 +72,8 @@ def init_db(c=None):
         total_bytes INTEGER DEFAULT 0,
         download_speed TEXT DEFAULT '',
         eta TEXT DEFAULT '',
-        wireguard INTEGER DEFAULT 0
+        wireguard INTEGER DEFAULT 0,
+        file_path TEXT DEFAULT ''
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS provider_connections(
         provider TEXT PRIMARY KEY,
