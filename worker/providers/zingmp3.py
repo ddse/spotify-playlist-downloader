@@ -84,7 +84,7 @@ def _initialize(session, debug=None):
 
 
 def _api(session, path, params, debug=None):
-    _initialize(session)
+    _initialize(session, debug=debug)
     url = build_api_url(path, params)
     started = time.time()
     response = session.get(url, timeout=TIMEOUT)
@@ -115,13 +115,12 @@ def _api(session, path, params, debug=None):
     if data.get("err") != 0:
         err_code = data.get("err")
         message = data.get("msg") or "unknown error"
-        if err_code == -1110:
+        if err_code == -1110 and path == "/api/v2/song/get/streaming":
             raise ZingMp3Error(
-                "Zing MP3 streaming is geo-restricted (API -1110). "
-                "Search can work while audio streaming is blocked. "
-                "The download request must egress from a region where Zing "
-                "allows streaming (yt-dlp also identifies VN as Zing's geo "
-                "country). Check WireGuard routing/public IP before retrying."
+                "Zing MP3 streaming API returned -1110: "
+                f"{message}. Search can still succeed because it uses a different endpoint. "
+                "See the download diagnostics for the exact endpoint, HTTP response, "
+                "and WireGuard state."
             )
         raise ZingMp3Error(
             f"Zing MP3 API error {err_code}: {message}"
@@ -236,25 +235,25 @@ def _song_id(source):
     return source
 
 
-def get_song(song_id, session=None):
+def get_song(song_id, session=None, debug=None):
     session = session or _session()
-    data = _api(session, "/api/v2/page/get/song", {"id": _song_id(song_id)})
+    data = _api(session, "/api/v2/page/get/song", {"id": _song_id(song_id)}, debug=debug)
     song = data.get("data")
     if not isinstance(song, dict):
         raise ZingMp3Error("Zing MP3 song metadata is missing")
     return song
 
 
-def get_stream_url(source, session=None):
+def get_stream_url(source, session=None, debug=None):
     session = session or _session()
     song_id = _song_id(source)
     # Search results already expose encodeId. For old/full Zing URLs, resolve
     # the page first so streaming always receives the current encodeId.
     if "/" in str(source):
-        song = get_song(song_id, session=session)
+        song = get_song(song_id, session=session, debug=debug)
         song_id = song.get("encodeId") or song_id
 
-    data = _api(session, "/api/v2/song/get/streaming", {"id": song_id})
+    data = _api(session, "/api/v2/song/get/streaming", {"id": song_id}, debug=debug)
     streams = data.get("data")
     if not isinstance(streams, dict):
         raise ZingMp3Error("Zing MP3 streaming data is missing")
