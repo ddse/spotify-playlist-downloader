@@ -118,7 +118,7 @@ async def wireguard_settings():
         'status': 'unavailable',
     }
     try:
-        async with httpx.AsyncClient(timeout=3) as client:
+        async with httpx.AsyncClient(timeout=8) as client:
             response = await client.get(
                 f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard"
             )
