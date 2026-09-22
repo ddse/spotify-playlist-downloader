@@ -101,6 +101,7 @@ class WireGuardManagerTests(unittest.TestCase):
     def test_apply_enabled_async_rejects_duplicate_transition(self):
         self.wireguard._operation = "connecting"
         self.assertFalse(self.wireguard.apply_enabled_async(False))
+        self.wireguard._operation = None
 
     def test_enable_runs_wg_quick_up_only_when_down(self):
         with patch.object(
