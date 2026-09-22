@@ -45,7 +45,6 @@ def test_nhaccuatui_parser_normalizes_results(monkeypatch):
     assert result["items"][0]["title"] == "Test Song"
 
 
-
 def test_zingmp3_signed_search_filters_albums(monkeypatch):
     zing = load_provider("zingmp3")
     calls = []
@@ -220,3 +219,30 @@ def test_zingmp3_streaming_error_trace_identifies_endpoint(monkeypatch):
         and step.get("status") == "error"
         for step in debug
     )
+
+
+def test_search_sources_follow_wireguard_setting(monkeypatch):
+    search_mod = importlib.util.spec_from_file_location("worker_search", ROOT / "worker" / "search.py")
+    module = importlib.util.module_from_spec(search_mod)
+    search_mod.loader.exec_module(module)
+
+    calls = []
+
+    def fake_run(enabled, func):
+        calls.append(enabled)
+        return func()
+
+    monkeypatch.setattr(module.manager, "run", fake_run)
+    monkeypatch.setattr(module.PROVIDERS["youtube"], lambda *args: {"items": [{"id": "y"}]})
+    monkeypatch.setattr(module.PROVIDERS["zingmp3"], lambda *args: {"items": [{"id": "z"}]})
+    monkeypatch.setattr(module.PROVIDERS["nhaccuatui"], lambda *args: {"items": [{"id": "n"}]})
+
+    assert module.search("test", source="youtube", wireguard=True)["items"]
+    assert module.search("test", source="zingmp3", wireguard=True)["items"]
+    assert module.search("test", source="nhaccuatui", wireguard=True)["items"]
+    assert calls == [True, True, True]
+
+    calls.clear()
+    assert module.search("test", source="zingmp3", wireguard=False)["items"]
+    assert module.search("test", source="nhaccuatui", wireguard=False)["items"]
+    assert calls == [False, False]
