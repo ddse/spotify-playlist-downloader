@@ -1,0 +1,8 @@
+# syntax=docker/dockerfile:1
+# Development image. Build the production web image once, then mount source
+# from the host so Python changes do not require a rebuild.
+FROM spotify-playlist-downloader-web:dev-base
+
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
