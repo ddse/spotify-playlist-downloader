@@ -115,7 +115,7 @@ async def wireguard_settings():
         'interface': os.getenv('WG_INTERFACE', 'wg0'),
         'config_path': os.getenv('WG_CONFIG', '/etc/wireguard/wg0.conf'),
         'config_exists': False,
-        'status': 'unavailable',
+        'status': 'connecting' if wireguard_enabled() else 'unavailable',
     }
     try:
         async with httpx.AsyncClient(timeout=8) as client:
@@ -142,7 +142,13 @@ async def wireguard_settings():
             })
             # `enabled` is the live interface state; persisted preference is separate.
             result['requested_enabled'] = wireguard_enabled()
+            if result['requested_enabled'] and result['status'] in {'routing', 'unavailable'}:
+                result['status'] = 'connecting'
     except Exception as e:
+        result['requested_enabled'] = wireguard_enabled()
+        if result['requested_enabled']:
+            result['status'] = 'connecting'
+            result['status_detail'] = 'WireGuard transition is still in progress; worker status is temporarily unavailable.'
         result['detail'] = str(e)
     return result
 
@@ -168,6 +174,8 @@ async def wireguard_toggle(enabled: bool = Form(...)):
             response.raise_for_status()
             result = response.json()
             result['requested_enabled'] = enabled
+            if enabled and not result.get('enabled') and result.get('status') != 'connected':
+                result['status'] = 'connecting'
             # `enabled` remains the live interface state returned by worker.
             return result
     except Exception as e:
@@ -234,7 +242,7 @@ async def services():
                 'interface':wg.get('interface','wg0'),
                 'config_path':wg.get('config_path',os.getenv('WG_CONFIG','/etc/wireguard/wg0.conf')),
                 'config_exists':bool(wg.get('config_exists')),
-                'status':wg.get('status') or ('connected' if wg.get('vpn_route') else ('routing' if wg.get('enabled') else 'disconnected')),
+                'status':wg.get('status') or ('connected' if wg.get('vpn_route') else ('connecting' if wireguard_enabled() else 'disconnected')),
                 'vpn_route':bool(wg.get('vpn_route')),
                 'route_active':bool(wg.get('route_active')),
                 'handshake_recent':bool(wg.get('handshake_recent')),
