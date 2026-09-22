@@ -142,12 +142,51 @@ def download_zingmp3(row, c, track_id):
     folder.mkdir(parents=True, exist_ok=True)
     output = folder / f'{title}.mp3'
 
-    stream_url = zing_get_stream_url(row['source_url'])
+    zing_debug = []
+    wg_before = manager.debug_status()
+    zing_debug.append({
+        'step': 'wireguard_before_zing_download',
+        'status': wg_before.get('status'),
+        'detail': wg_before,
+    })
+    try:
+        stream_url = zing_get_stream_url(row['source_url'], debug=zing_debug)
+        zing_debug.append({
+            'step': 'zing_stream_url',
+            'status': 'ok',
+            'url_host': urlparse(stream_url).hostname or '',
+        })
+    except Exception as exc:
+        zing_debug.append({
+            'step': 'zing_stream_url',
+            'status': 'error',
+            'error': f'{type(exc).__name__}: {exc}',
+        })
+        raise RuntimeError(
+            'Zing MP3 download diagnostics:\\n' +
+            '\\n'.join(str(step) for step in zing_debug) +
+            '\\nOriginal error: ' + f'{type(exc).__name__}: {exc}'
+        ) from exc
+
+    wg_after_api = manager.debug_status()
+    zing_debug.append({
+        'step': 'wireguard_after_zing_api',
+        'status': wg_after_api.get('status'),
+        'detail': wg_after_api,
+    })
+
     req = urllib.request.Request(stream_url, headers={
         'User-Agent': 'Mozilla/5.0',
         'Referer': 'https://zingmp3.vn/',
     })
     with urllib.request.urlopen(req, timeout=60) as response, open(output, 'wb') as fp:
+        zing_debug.append({
+            'step': 'zing_stream_download',
+            'status': 'http_ok',
+            'http_status': getattr(response, 'status', None),
+            'content_type': response.headers.get('Content-Type', ''),
+            'content_length': response.headers.get('Content-Length', ''),
+        })
         total = int(response.headers.get('Content-Length') or 0)
         downloaded = 0
         last_update = 0.0
@@ -170,8 +209,19 @@ def download_zingmp3(row, c, track_id):
                 heartbeat(c, 'downloading:' + track_id)
                 last_update = now
 
+    wg_after_download = manager.debug_status()
+    zing_debug.append({
+        'step': 'wireguard_after_zing_download',
+        'status': wg_after_download.get('status'),
+        'detail': wg_after_download,
+        'downloaded_bytes': downloaded,
+    })
+
     if downloaded < 10240:
-        raise RuntimeError('Zing MP3 download is unexpectedly small')
+        raise RuntimeError(
+            'Zing MP3 download is unexpectedly small. Diagnostics: ' +
+            '\\n'.join(str(step) for step in zing_debug)
+        )
     with open(output, 'rb') as fp:
         header = fp.read(12)
     if not (header.startswith(b'ID3') or header[:2] in (b'\xff\xfb', b'\xff\xf3', b'\xff\xf2')):
