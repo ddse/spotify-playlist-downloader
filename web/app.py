@@ -512,26 +512,46 @@ def history():
 
 @app.get('/api/files/{track_id}')
 def download_file(track_id:str, download:bool=Query(False)):
-    c=db(); row=c.execute('SELECT * FROM tracks WHERE spotify_id=? AND status=\'completed\'',(track_id,)).fetchone(); c.close()
-    if not row: raise HTTPException(404,'completed file not found')
-    music=Path(os.getenv('MUSIC_DIR','/music')).resolve()
-    artist=(row['artists'] or 'Unknown Artist').replace('/','_')
-    album=(row['album'] or 'YouTube').replace('/','_')
-    title=(row['title'] or 'Unknown Title').replace('/','_')
-    custom=(row['download_folder'] or '').strip()
-    folder=(music / custom) if custom else (music / artist / album)
-    folder=folder.resolve()
-    if music not in folder.parents and folder != music: raise HTTPException(400,'invalid download folder')
-    preferred=[]
-    fmt=(row['download_format'] or '').lower()
-    if fmt in {'mp3','m4a','opus','wav','flac','mp4'}: preferred.append(fmt)
-    preferred += ['mp3','m4a','opus','flac','wav','mp4','webm','mkv','mov']
-    for ext in dict.fromkeys(preferred):
-        p=folder / f'{title}.{ext}'
-        if p.is_file(): return FileResponse(p, filename=p.name, content_disposition_type='attachment' if download else 'inline')
-    matches=sorted(folder.glob(f'{title}.*'), key=lambda p:p.stat().st_mtime, reverse=True)
-    for p in matches:
-        if p.is_file() and p.suffix.lower() not in {'.jpg','.jpeg','.png','.webp','.vtt','.srt','.ass','.lrc'}:
-            return FileResponse(p, filename=p.name, content_disposition_type='attachment' if download else 'inline')
-    raise HTTPException(404,'completed file not found')
+    c=db()
+    row=c.execute("SELECT * FROM tracks WHERE spotify_id=? AND status='completed'", (track_id,)).fetchone()
+    c.close()
+    if not row:
+        raise HTTPException(404, 'completed file not found')
+
+    music = Path(os.getenv('MUSIC_DIR', '/music')).resolve()
+    path_value = (row['file_path'] or '').strip() if 'file_path' in row.keys() else ''
+    candidates = [Path(path_value)] if path_value else []
+
+    artist = (row['artists'] or 'Unknown Artist').replace('/', '_')
+    album = (row['album'] or 'YouTube').replace('/', '_')
+    title = (row['title'] or 'Unknown Title').replace('/', '_')
+    custom = (row['download_folder'] or '').strip()
+    folder = (music / custom) if custom else (music / artist / album)
+    folder = folder.resolve()
+    if music not in folder.parents and folder != music:
+        raise HTTPException(400, 'invalid download folder')
+
+    candidates.extend(folder.glob(f'{title}.*'))
+    if folder.exists():
+        candidates.extend(folder.rglob('*'))
+
+    excluded = {'.jpg', '.jpeg', '.png', '.webp', '.vtt', '.srt', '.ass', '.lrc', '.part', '.ytdl'}
+    seen = set()
+    for p in candidates:
+        try:
+            p = p.resolve()
+        except OSError:
+            continue
+        if str(p) in seen or not p.is_file() or p.suffix.lower() in excluded:
+            continue
+        seen.add(str(p))
+        if music not in p.parents:
+            continue
+        return FileResponse(
+            p,
+            filename=p.name,
+            content_disposition_type='attachment' if download else 'inline',
+        )
+
+    raise HTTPException(404, 'completed file not found')
 
