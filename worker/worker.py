@@ -412,6 +412,7 @@ def download_zingmp3(row, c, track_id):
         header = fp.read(12)
     if not (header.startswith(b'ID3') or header[:2] in (b'\xff\xfb', b'\xff\xf3', b'\xff\xf2')):
         raise RuntimeError('Zing MP3 download does not look like MP3 audio')
+    return str(output.resolve())
 
 
 def download(row, c, track_id):
