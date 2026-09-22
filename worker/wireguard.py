@@ -210,7 +210,7 @@ def status():
             status = "connecting"
             status_detail = "Interface is up; waiting for WireGuard routing"
         elif not handshake_recent:
-            status = "connecting"
+            status = "routing"
             status_detail = "Route is active; waiting for a recent peer handshake"
         elif not public_ip:
             status = "connecting"
