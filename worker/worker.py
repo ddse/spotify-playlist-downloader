@@ -146,6 +146,7 @@ def format_speed(value):
 
 
 from output import describe_recent_media, resolve_downloaded_file
+from progress import clear_download_progress
 
 def format_eta(seconds):
     if seconds is None or seconds < 0:
@@ -403,10 +404,7 @@ def download(row, c, track_id, download_started_at=0):
                 last_heartbeat = now
 
         elif status == 'finished':
-            c.execute(
-                'UPDATE tracks SET progress=99,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
-                (track_id,),
-            )
+            clear_download_progress(c, track_id)
             c.commit()
             heartbeat(c, 'postprocessing:' + track_id)
 
