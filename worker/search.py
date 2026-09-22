@@ -67,8 +67,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # The browser/client may cancel a request while the provider is
+            # still resolving. Do not turn a normal client disconnect into a
+            # noisy worker traceback.
+            return
 
     def do_GET(self):
         parsed = urlparse(self.path)
