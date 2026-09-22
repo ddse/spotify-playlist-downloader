@@ -4,6 +4,7 @@ import json
 import re
 import urllib.parse
 import requests
+import time
 
 
 DOMAIN = "https://zingmp3.vn"
@@ -59,29 +60,70 @@ def build_api_url(path, params):
     return f"{DOMAIN}{path}?{query}"
 
 
-def _initialize(session):
+def _initialize(session, debug=None):
     if session.cookies.get("zmp3_rqid"):
         return
     # Zing returns err=-201 for an empty song id; the response is still
     # useful because it sets the visitor cookie required by subsequent APIs.
     url = build_api_url("/api/v2/page/get/song", {"id": ""})
+    started = time.time()
     response = session.get(url, timeout=TIMEOUT)
+    if debug is not None:
+        debug.append({
+            "step": "zing_session_init",
+            "status": "ok" if response.ok else "error",
+            "http_status": response.status_code,
+            "content_type": response.headers.get("Content-Type", ""),
+            "content_length": len(response.content),
+            "duration_ms": round((time.time() - started) * 1000),
+            "cookie_created": bool(session.cookies.get("zmp3_rqid")),
+        })
     response.raise_for_status()
     if not session.cookies.get("zmp3_rqid"):
         raise ZingMp3Error("Zing MP3 session cookie zmp3_rqid was not created")
 
 
-def _api(session, path, params):
-    _initialize(session)
-    response = session.get(build_api_url(path, params), timeout=TIMEOUT)
+def _api(session, path, params, debug=None):
+    _initialize(session, debug=debug)
+    url = build_api_url(path, params)
+    started = time.time()
+    response = session.get(url, timeout=TIMEOUT)
+    if debug is not None:
+        debug.append({
+            "step": "zing_http",
+            "status": "ok" if response.ok else "error",
+            "path": path,
+            "http_status": response.status_code,
+            "content_type": response.headers.get("Content-Type", ""),
+            "content_length": len(response.content),
+            "duration_ms": round((time.time() - started) * 1000),
+            "cookie_created": bool(session.cookies.get("zmp3_rqid")),
+        })
     response.raise_for_status()
     try:
         data = response.json()
     except ValueError as exc:
         raise ZingMp3Error("Zing MP3 returned invalid JSON") from exc
+    if debug is not None:
+        debug.append({
+            "step": "zing_json",
+            "status": "ok" if data.get("err") == 0 else "error",
+            "err": data.get("err"),
+            "msg": data.get("msg") or "",
+            "has_data": bool(data.get("data")),
+        })
     if data.get("err") != 0:
+        err_code = data.get("err")
+        message = data.get("msg") or "unknown error"
+        if err_code == -1110 and path == "/api/v2/song/get/streaming":
+            raise ZingMp3Error(
+                "Zing MP3 streaming API returned -1110: "
+                f"{message}. Search can still succeed because it uses a different endpoint. "
+                "See the download diagnostics for the exact endpoint, HTTP response, "
+                "and WireGuard state."
+            )
         raise ZingMp3Error(
-            f"Zing MP3 API error {data.get('err')}: {data.get('msg') or 'unknown error'}"
+            f"Zing MP3 API error {err_code}: {message}"
         )
     return data
 
@@ -158,7 +200,7 @@ def _normalize(data, limit, page):
     }
 
 
-def search(query, page=1, limit=10):
+def search(query, page=1, limit=10, debug=False):
     page = max(1, int(page))
     limit = max(1, min(int(limit), PAGE_SIZE))
     query = str(query or "").strip()
@@ -166,11 +208,21 @@ def search(query, page=1, limit=10):
         return {"items": [], "page": page, "limit": limit, "has_more": False}
 
     session = _session()
+    debug_steps = [] if debug else None
     data = _api(session, "/api/v2/search/multi", {
         "q": query,
         "allowCorrect": "1",
-    })
-    return _normalize(data, limit, page)
+    }, debug=debug_steps)
+    result = _normalize(data, limit, page)
+    if debug:
+        result["_provider_debug"] = {
+            "provider": "zingmp3",
+            "domain": DOMAIN,
+            "api_path": "/api/v2/search/multi",
+            "steps": debug_steps,
+            "normalized_count": len(result["items"]),
+        }
+    return result
 
 
 def _song_id(source):
@@ -183,25 +235,25 @@ def _song_id(source):
     return source
 
 
-def get_song(song_id, session=None):
+def get_song(song_id, session=None, debug=None):
     session = session or _session()
-    data = _api(session, "/api/v2/page/get/song", {"id": _song_id(song_id)})
+    data = _api(session, "/api/v2/page/get/song", {"id": _song_id(song_id)}, debug=debug)
     song = data.get("data")
     if not isinstance(song, dict):
         raise ZingMp3Error("Zing MP3 song metadata is missing")
     return song
 
 
-def get_stream_url(source, session=None):
+def get_stream_url(source, session=None, debug=None):
     session = session or _session()
     song_id = _song_id(source)
     # Search results already expose encodeId. For old/full Zing URLs, resolve
     # the page first so streaming always receives the current encodeId.
     if "/" in str(source):
-        song = get_song(song_id, session=session)
+        song = get_song(song_id, session=session, debug=debug)
         song_id = song.get("encodeId") or song_id
 
-    data = _api(session, "/api/v2/song/get/streaming", {"id": song_id})
+    data = _api(session, "/api/v2/song/get/streaming", {"id": song_id}, debug=debug)
     streams = data.get("data")
     if not isinstance(streams, dict):
         raise ZingMp3Error("Zing MP3 streaming data is missing")

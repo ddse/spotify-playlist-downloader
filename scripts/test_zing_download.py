@@ -8,6 +8,12 @@ import os
 import tempfile
 import urllib.request
 
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
 from worker.providers import zingmp3
 
 SOURCE = "https://zingmp3.vn/bai-hat/Hoa-Vo-Sac-Jack-K-ICM/ZWB0IFAD.html"

@@ -61,6 +61,12 @@ FMT = os.getenv('AUDIO_FORMAT', 'mp3')
 BITRATE = os.getenv('AUDIO_BITRATE', '320K')
 
 
+class DownloadDebugError(RuntimeError):
+    def __init__(self, message, logs=''):
+        super().__init__(message)
+        self.logs = logs
+
+
 def conn():
     from database import db
     return db()
@@ -142,12 +148,51 @@ def download_zingmp3(row, c, track_id):
     folder.mkdir(parents=True, exist_ok=True)
     output = folder / f'{title}.mp3'
 
-    stream_url = zing_get_stream_url(row['source_url'])
+    zing_debug = []
+    wg_before = manager.debug_status()
+    zing_debug.append({
+        'step': 'wireguard_before_zing_download',
+        'status': wg_before.get('status'),
+        'detail': wg_before,
+    })
+    try:
+        stream_url = zing_get_stream_url(row['source_url'], debug=zing_debug)
+        zing_debug.append({
+            'step': 'zing_stream_url',
+            'status': 'ok',
+            'url_host': urlparse(stream_url).hostname or '',
+        })
+    except Exception as exc:
+        zing_debug.append({
+            'step': 'zing_stream_url',
+            'status': 'error',
+            'error': f'{type(exc).__name__}: {exc}',
+        })
+        raise RuntimeError(
+            'Zing MP3 download diagnostics:\\n' +
+            '\\n'.join(str(step) for step in zing_debug) +
+            '\\nOriginal error: ' + f'{type(exc).__name__}: {exc}'
+        ) from exc
+
+    wg_after_api = manager.debug_status()
+    zing_debug.append({
+        'step': 'wireguard_after_zing_api',
+        'status': wg_after_api.get('status'),
+        'detail': wg_after_api,
+    })
+
     req = urllib.request.Request(stream_url, headers={
         'User-Agent': 'Mozilla/5.0',
         'Referer': 'https://zingmp3.vn/',
     })
     with urllib.request.urlopen(req, timeout=60) as response, open(output, 'wb') as fp:
+        zing_debug.append({
+            'step': 'zing_stream_download',
+            'status': 'http_ok',
+            'http_status': getattr(response, 'status', None),
+            'content_type': response.headers.get('Content-Type', ''),
+            'content_length': response.headers.get('Content-Length', ''),
+        })
         total = int(response.headers.get('Content-Length') or 0)
         downloaded = 0
         last_update = 0.0
@@ -162,7 +207,7 @@ def download_zingmp3(row, c, track_id):
                 percent = int(downloaded * 100 / total) if total else 1
                 c.execute(
                     'UPDATE tracks SET progress=?,downloaded_bytes=?,total_bytes=?,download_speed=?,eta=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
-                    (max(1, min(99, percent)), downloaded, format_speed(
+                    (max(1, min(99, percent)), downloaded, total, format_speed(
                         downloaded / max(now - last_update, 1)
                     ), '', track_id),
                 )
@@ -170,8 +215,19 @@ def download_zingmp3(row, c, track_id):
                 heartbeat(c, 'downloading:' + track_id)
                 last_update = now
 
+    wg_after_download = manager.debug_status()
+    zing_debug.append({
+        'step': 'wireguard_after_zing_download',
+        'status': wg_after_download.get('status'),
+        'detail': wg_after_download,
+        'downloaded_bytes': downloaded,
+    })
+
     if downloaded < 10240:
-        raise RuntimeError('Zing MP3 download is unexpectedly small')
+        raise RuntimeError(
+            'Zing MP3 download is unexpectedly small. Diagnostics: ' +
+            '\\n'.join(str(step) for step in zing_debug)
+        )
     with open(output, 'rb') as fp:
         header = fp.read(12)
     if not (header.startswith(b'ID3') or header[:2] in (b'\xff\xfb', b'\xff\xf3', b'\xff\xf2')):
@@ -316,11 +372,20 @@ def download(row, c, track_id):
             opts['format'] = f'bestvideo{height}+bestaudio/best{height}'
         opts['merge_output_format'] = 'mp4'
 
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        result = ydl.download([url])
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            result = ydl.download([url])
+    except Exception as exc:
+        raise DownloadDebugError(
+            f'{type(exc).__name__}: {exc}',
+            '\\n'.join(log_lines),
+        ) from exc
 
     if result not in (None, 0):
-        raise RuntimeError(f'yt-dlp exited with code {result}')
+        raise DownloadDebugError(
+            f'yt-dlp exited with code {result}',
+            '\\n'.join(log_lines),
+        )
 
 
 def format_error(exc, logger_text=''):
@@ -374,7 +439,7 @@ while True:
                 (track_id,),
             )
         except Exception as e:
-            err = format_error(e, '\n'.join(log_lines) if 'log_lines' in locals() else '')
+            err = format_error(e, getattr(e, 'logs', ''))
             c.execute(
                 "UPDATE tracks SET status='failed',progress=0,error=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
                 (err, track_id),

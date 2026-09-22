@@ -115,10 +115,10 @@ async def wireguard_settings():
         'interface': os.getenv('WG_INTERFACE', 'wg0'),
         'config_path': os.getenv('WG_CONFIG', '/etc/wireguard/wg0.conf'),
         'config_exists': False,
-        'status': 'unavailable',
+        'status': 'connecting' if wireguard_enabled() else 'unavailable',
     }
     try:
-        async with httpx.AsyncClient(timeout=3) as client:
+        async with httpx.AsyncClient(timeout=8) as client:
             response = await client.get(
                 f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard"
             )
@@ -126,6 +126,7 @@ async def wireguard_settings():
             wg = response.json()
             result.update({
                 'enabled': bool(wg.get('enabled')),
+                'requested_enabled': wireguard_enabled(),
                 'interface': wg.get('interface', 'wg0'),
                 'config_path': wg.get('config_path', os.getenv('WG_CONFIG', '/etc/wireguard/wg0.conf')),
                 'config_exists': bool(wg.get('config_exists')),
@@ -139,8 +140,15 @@ async def wireguard_settings():
                 'send_bytes': int(wg.get('send_bytes', 0)),
                 'peer_count': int(wg.get('peer_count', 0)),
             })
-            result['enabled'] = wireguard_enabled()
+            # `enabled` is the live interface state; persisted preference is separate.
+            result['requested_enabled'] = wireguard_enabled()
+            if result['requested_enabled'] and result['status'] in {'routing', 'unavailable'}:
+                result['status'] = 'connecting'
     except Exception as e:
+        result['requested_enabled'] = wireguard_enabled()
+        if result['requested_enabled']:
+            result['status'] = 'connecting'
+            result['status_detail'] = 'WireGuard transition is still in progress; worker status is temporarily unavailable.'
         result['detail'] = str(e)
     return result
 
@@ -165,10 +173,13 @@ async def wireguard_toggle(enabled: bool = Form(...)):
             )
             response.raise_for_status()
             result = response.json()
-            result['enabled'] = enabled
+            result['requested_enabled'] = enabled
+            if enabled and not result.get('enabled') and result.get('status') != 'connected':
+                result['status'] = 'connecting'
+            # `enabled` remains the live interface state returned by worker.
             return result
     except Exception as e:
-        return {'enabled': enabled, 'status': 'unavailable', 'error': str(e)}
+        return {'enabled': False, 'requested_enabled': enabled, 'status': 'unavailable', 'error': str(e)}
 
 
 @app.get('/api/settings/connections')
@@ -231,7 +242,7 @@ async def services():
                 'interface':wg.get('interface','wg0'),
                 'config_path':wg.get('config_path',os.getenv('WG_CONFIG','/etc/wireguard/wg0.conf')),
                 'config_exists':bool(wg.get('config_exists')),
-                'status':wg.get('status') or ('connected' if wg.get('vpn_route') else ('routing' if wg.get('enabled') else 'disconnected')),
+                'status':wg.get('status') or ('connected' if wg.get('vpn_route') else ('connecting' if wireguard_enabled() else 'disconnected')),
                 'vpn_route':bool(wg.get('vpn_route')),
                 'route_active':bool(wg.get('route_active')),
                 'handshake_recent':bool(wg.get('handshake_recent')),
@@ -297,21 +308,21 @@ async def search_spotify(q:str=''):
     }
 
 @app.get('/api/search/youtube')
-async def search_youtube(q:str='',page:int=1,limit:int=10):
+async def search_youtube(q:str='',page:int=1,limit:int=10,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit,wireguard=wireguard_enabled())
+    try:return await youtube_search(q,page=page,limit=limit,wireguard=wireguard_enabled(),debug=bool(debug))
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.get('/api/search/zingmp3')
-async def search_zingmp3(q:str='',page:int=1,limit:int=10):
+async def search_zingmp3(q:str='',page:int=1,limit:int=10,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit,source='zingmp3',wireguard=wireguard_enabled())
+    try:return await youtube_search(q,page=page,limit=limit,source='zingmp3',wireguard=wireguard_enabled(),debug=bool(debug))
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.get('/api/search/nhaccuatui')
-async def search_nhaccuatui(q:str='',page:int=1,limit:int=10):
+async def search_nhaccuatui(q:str='',page:int=1,limit:int=10,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit,source='nhaccuatui',wireguard=wireguard_enabled())
+    try:return await youtube_search(q,page=page,limit=limit,source='nhaccuatui',wireguard=wireguard_enabled(),debug=bool(debug))
     except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.post('/api/download')
