@@ -167,10 +167,11 @@ async def wireguard_toggle(enabled: bool = Form(...)):
             )
             response.raise_for_status()
             result = response.json()
-            result['enabled'] = enabled
+            result['requested_enabled'] = enabled
+            # `enabled` remains the live interface state returned by worker.
             return result
     except Exception as e:
-        return {'enabled': enabled, 'status': 'unavailable', 'error': str(e)}
+        return {'enabled': False, 'requested_enabled': enabled, 'status': 'unavailable', 'error': str(e)}
 
 
 @app.get('/api/settings/connections')
