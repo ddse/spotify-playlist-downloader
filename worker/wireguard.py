@@ -18,12 +18,22 @@ def _run(*args):
 
 
 def is_up():
-    result = subprocess.run(
-        ["wg", "show", INTERFACE],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return result.returncode == 0
+    """Return whether the WireGuard interface exists and is currently up.
+
+    CI and development environments may not have the WireGuard userspace
+    tools installed. Missing "wg" means the interface cannot be up; it
+    should not make diagnostics or search fail.
+    """
+    try:
+        result = subprocess.run(
+            ["wg", "show", INTERFACE],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, OSError):
+        return False
 
 
 def set_enabled(enabled: bool):
@@ -115,7 +125,7 @@ def debug_status():
         return {
             "requested_enabled": bool(_state),
             "interface": INTERFACE,
-            "config_exists": os.path.isfile(CONFIG) or is_up(),
+            "config_exists": os.path.isfile(CONFIG),
             "interface_up": False,
             "route_active": False,
             "handshake_recent": False,
