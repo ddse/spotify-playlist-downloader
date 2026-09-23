@@ -22,46 +22,35 @@ def load_provider(name):
 def test_nhaccuatui_search_is_fully_mocked(monkeypatch):
     nct = load_provider("nhaccuatui")
     captured = {}
-
-    html = """
-      <a href="https://www.nhaccuatui.com/bai-hat/mock-song.ABC.html">
-        Mock <b>Song</b>
-      </a>
-      <a href="https://www.nhaccuatui.com/bai-hat/mock-song.ABC.html">duplicate</a>
-      <a href="https://www.nhaccuatui.com/song/OTHER123?source=test">
-        Other Song
-      </a>
-    """
+    payload = {"success": True, "data": {"songs": [
+        {"key": "MOCK123", "name": "Mock Song"},
+        {"key": "OTHER123", "name": "Other Song"},
+    ]}}
 
     class Response:
+        headers = {}
         def read(self):
-            return html.encode("utf-8")
+            import json
+            return json.dumps(payload).encode("utf-8")
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return None
-
-    def fake_urlopen(request, timeout=20):
+    def fake_urlopen(request, timeout=30):
         captured["url"] = request.full_url
         captured["headers"] = dict(request.header_items())
         captured["timeout"] = timeout
         return Response()
 
     monkeypatch.setattr(nct.urllib.request, "urlopen", fake_urlopen)
-
     result = nct.search("mock & song", page=1, limit=10)
 
-    assert captured["url"] == (
-        "https://www.nhaccuatui.com/tim-kiem?q=mock%20%26%20song"
-    )
-    assert captured["timeout"] == 20
+    assert captured["url"].startswith("https://graph.nct.vn/api/v1/search/song?")
+    assert "keyword=mock+%26+song" in captured["url"]
+    assert captured["timeout"] == 30
     assert len(result["items"]) == 2
     assert result["items"][0]["title"] == "Mock Song"
-    assert result["items"][1]["id"].startswith(
-        "https://www.nhaccuatui.com/song/"
-    )
+    assert result["items"][0]["id"] == "https://www.nhaccuatui.com/song/MOCK123"
+    assert result["items"][1]["id"] == "https://www.nhaccuatui.com/song/OTHER123"
     assert result["items"][0]["source"] == "nhaccuatui"
 
 
