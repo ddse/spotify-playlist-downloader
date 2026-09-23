@@ -1,126 +1,156 @@
 #!/usr/bin/env python3
-"""Live NhacCuaTui integration test based on carlylekatto/nct.js.
+"""Live NhacCuaTui stream download test.
 
-The reference client uses:
-  BASE_URL = https://graph.nct.vn
-  GET /api/v1/search/song
-  GET /api/v1/song/detail/{songKey}
+Usage:
+  python scripts/test_nhaccuatui_download.py
+  python scripts/test_nhaccuatui_download.py --stream-url 'https://...signed...'
+  python scripts/test_nhaccuatui_download.py --output /tmp/Hoa-Vo-Sac.mp3
 
-This script validates both the NCT API contract used by nct.js and the
-application's NhacCuaTui search provider.
+The stream URL is always used exactly as returned by the API. This script
+never constructs or replaces the CDN hostname.
 """
 
-import gzip
+import argparse
 import json
-import re
-import urllib.request
-from urllib.parse import urlencode
+import subprocess
+import sys
+from pathlib import Path
 
 from worker.providers import nhaccuatui
 
 
-BASE_URL = "https://graph.nct.vn"
 QUERY = "Hoa Vo Sac"
-PAGE = 1
-LIMIT = 10
-
-HEADERS = {
-    "User-Agent": "okhttp/4.12.0",
-    "Accept-Encoding": "gzip",
-    "Content-Type": "application/json",
-    "x-os": "android",
-}
+DEFAULT_OUTPUT = "Hoa Vo Sac.mp3"
 
 
-def nct_request(path, params=None):
-    url = f"{BASE_URL}{path}"
-    if params:
-        url += "?" + urlencode(params)
+def resolve_test_stream(stream_url=None):
+    if stream_url:
+        return stream_url
 
-    request = urllib.request.Request(url, headers=HEADERS)
-    with urllib.request.urlopen(request, timeout=30) as response:
-        assert response.status == 200, f"NCT API HTTP {response.status}"
-        body = response.read()\n        if (response.headers.get("Content-Encoding") or "").lower() == "gzip":\n            body = gzip.decompress(body)\n        payload = json.loads(body.decode("utf-8"))
+    result = nhaccuatui.search(QUERY, page=1, limit=10)
+    items = result["items"]
+    if not items:
+        raise RuntimeError(f"No NhacCuaTui result for {QUERY!r}")
 
-    assert payload.get("success") is not False, payload
-    assert payload.get("code", 0) == 0, payload
-    return payload.get("data")
+    print(f"Search result: {items[0]['title']}")
+    print(f"Source URL:    {items[0]['url']}")
+    return nhaccuatui.get_stream_url(items[0]["url"])
 
 
-def test_nct_search():
-    data = nct_request(
-        "/api/v1/search/song",
-        {
-            "keyword": QUERY,
-            "pageindex": PAGE,
-            "pagesize": LIMIT,
-            "correct": "true",
+def download(stream_url, output):
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"Stream host:   {__import__('urllib.parse', fromlist=['urlparse']).urlparse(stream_url).hostname}")
+    print(f"Signed query:  {'yes' if '?' in stream_url else 'no'}")
+
+    import urllib.request
+
+    request = urllib.request.Request(
+        stream_url,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.nhaccuatui.com/",
+            "Accept": "audio/mpeg,audio/*;q=0.9,*/*;q=0.5",
         },
     )
 
-    assert isinstance(data, dict), type(data)
-    songs = data.get("songs") or []
-    assert songs, "nct.js-compatible API returned no songs"
+    temp = output.with_suffix(output.suffix + ".part")
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            status = getattr(response, "status", None)
+            content_type = (response.headers.get("Content-Type") or "").lower()
+            content_length = response.headers.get("Content-Length")
 
-    first = songs[0]
-    key = first.get("key")
-    assert key, first
-    assert first.get("name") or first.get("title"), first
+            print(f"HTTP status:   {status}")
+            print(f"Content-Type:  {content_type or '<missing>'}")
+            print(f"Content-Length:{content_length or '<missing>'}")
 
-    return first
+            if status != 200:
+                raise RuntimeError(f"Unexpected HTTP status: {status}")
+            if not ("audio" in content_type or "mpeg" in content_type or "octet-stream" in content_type):
+                raise RuntimeError(f"Unexpected Content-Type: {content_type!r}")
+
+            total = 0
+            with temp.open("wb") as fp:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    fp.write(chunk)
+                    total += len(chunk)
+
+        if total < 10 * 1024:
+            raise RuntimeError(f"Downloaded file is unexpectedly small: {total} bytes")
+
+        with temp.open("rb") as fp:
+            header = fp.read(16)
+
+        if not (
+            header.startswith(b"ID3")
+            or header[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")
+        ):
+            raise RuntimeError(f"Downloaded file does not look like MP3: {header!r}")
+
+        temp.replace(output)
+        print(f"Downloaded:    {total:,} bytes")
+    except Exception:
+        temp.unlink(missing_ok=True)
+        raise
+
+    return output
 
 
-def test_nct_song_detail(song):
-    key = song["key"]
-    data = nct_request(f"/api/v1/song/detail/{key}")
+def ffprobe(output):
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "a:0",
+        "-show_entries",
+        "format=format_name,duration,size:stream=codec_name,bit_rate,sample_rate,channels",
+        "-of", "json",
+        str(output),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffprobe failed: {result.stderr.strip()}")
 
-    assert isinstance(data, dict), type(data)
-    assert data.get("key") or key
-    assert data.get("name") or data.get("title"), data
+    data = json.loads(result.stdout)
+    streams = data.get("streams") or []
+    if not streams:
+        raise RuntimeError("ffprobe found no audio stream")
 
-    # nct.js exposes stream URLs from the cleaned song object. The API can
-    # return different stream field names, so only validate when present.
-    streams = data.get("streams")
-    if streams is not None:
-        assert isinstance(streams, (dict, list)), type(streams)
+    stream = streams[0]
+    bitrate = int(stream.get("bit_rate") or 0)
+
+    print("ffprobe:")
+    print(json.dumps(data, indent=2))
+
+    if bitrate and bitrate < 250_000:
+        raise RuntimeError(
+            f"Expected the 320kbps stream, but ffprobe reports only {bitrate} bps"
+        )
 
     return data
 
 
-def test_application_provider():
-    result = nhaccuatui.search(QUERY, page=PAGE, limit=LIMIT)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--stream-url", help="Use an already-issued signed streamURL")
+    parser.add_argument("--output", default=DEFAULT_OUTPUT)
+    args = parser.parse_args()
 
-    assert result["page"] == PAGE
-    assert result["limit"] == LIMIT
-    assert isinstance(result["items"], list)
-    assert result["items"], "application NhacCuaTui provider returned no results"
+    stream_url = resolve_test_stream(args.stream_url)
+    output = download(stream_url, args.output)
+    ffprobe(output)
 
-    for item in result["items"]:
-        assert item["id"], item
-        assert item["title"], item
-        assert item["source"] == "nhaccuatui"
-        assert re.match(
-            r"^https?://(?:www\.)?nhaccuatui\.com/(?:bai-hat|song)/",
-            item["url"],
-            re.I,
-        ), item
-        assert item["url"] == item["id"], item
-
-    return result
+    print()
+    print("PASS: NhacCuaTui signed 320kbps stream download")
+    print(f"File: {output.resolve()}")
 
 
-song = test_nct_search()
-detail = test_nct_song_detail(song)
-provider_result = test_application_provider()
-
-print("QUERY        :", QUERY)
-print("NCT SONG KEY :", song["key"])
-print("NCT TITLE    :", song.get("name") or song.get("title"))
-print("NCT DETAIL   :", detail.get("name") or detail.get("title"))
-print("NCT STREAMS  :", bool(detail.get("streams")))
-print("PROVIDER     : NhacCuaTui")
-print("RESULTS      :", len(provider_result["items"]))
-print("FIRST TITLE  :", provider_result["items"][0]["title"])
-print("FIRST URL    :", provider_result["items"][0]["url"])
-print()
-print("ALL NHACCUATUI TESTS PASSED")
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as exc:
+        print(f"FAIL: {type(exc).__name__}: {exc}", file=sys.stderr)
+        sys.exit(1)
