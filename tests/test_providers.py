@@ -237,9 +237,9 @@ def test_search_sources_follow_wireguard_setting(monkeypatch):
         return func()
 
     monkeypatch.setattr(module.manager, "run", fake_run)
-    monkeypatch.setattr(module.PROVIDERS["youtube"], lambda *args: {"items": [{"id": "y"}]})
-    monkeypatch.setattr(module.PROVIDERS["zingmp3"], lambda *args: {"items": [{"id": "z"}]})
-    monkeypatch.setattr(module.PROVIDERS["nhaccuatui"], lambda *args: {"items": [{"id": "n"}]})
+    monkeypatch.setitem(module.PROVIDERS, "youtube", lambda *args: {"items": [{"id": "y"}]})
+    monkeypatch.setitem(module.PROVIDERS, "zingmp3", lambda *args: {"items": [{"id": "z"}]})
+    monkeypatch.setitem(module.PROVIDERS, "nhaccuatui", lambda *args: {"items": [{"id": "n"}]})
 
     assert module.search("test", source="youtube", wireguard=True)["items"]
     assert module.search("test", source="zingmp3", wireguard=True)["items"]
