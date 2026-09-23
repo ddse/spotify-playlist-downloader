@@ -351,53 +351,73 @@ async def image_proxy(url: str):
     if not _is_allowed_outlink_host(parsed.hostname or ''):
         raise HTTPException(403, 'image host is not allowed')
 
-    headers = {'User-Agent': 'Mozilla/5.0', 'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'}
-    client = httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0), follow_redirects=False, headers=headers)
-
-    async def stream():
-        current = target
-        try:
-            async with client:
-                for _ in range(4):
-                    parsed_current = urllib.parse.urlsplit(current)
-                    if parsed_current.scheme not in {'http', 'https'} or not _is_allowed_outlink_host(parsed_current.hostname or ''):
-                        raise HTTPException(403, 'image redirect host is not allowed')
-                    response = await client.stream('GET', current)
-                    if response.status_code in {301, 302, 303, 307, 308}:
-                        location = response.headers.get('location')
-                        await response.aclose()
-                        if not location:
-                            raise HTTPException(502, 'image redirect missing location')
-                        current = urllib.parse.urljoin(current, location)
-                        continue
-                    if response.status_code != 200:
-                        await response.aclose()
-                        raise HTTPException(502, f'image fetch failed: HTTP {response.status_code}')
-
-                    content_type = (response.headers.get('content-type') or '').split(';', 1)[0].strip().lower()
-                    if not content_type.startswith('image/'):
-                        await response.aclose()
-                        raise HTTPException(415, 'upstream response is not an image')
-
-                    try:
-                        async for chunk in response.aiter_bytes(64 * 1024):
-                            yield chunk
-                    finally:
-                        await response.aclose()
-                    return
-                raise HTTPException(502, 'too many image redirects')
-        finally:
-            if not client.is_closed:
-                await client.aclose()
-
-    return StreamingResponse(
-        stream(),
-        media_type='image/jpeg',
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(15.0, connect=5.0),
+        follow_redirects=False,
         headers={
-            'Cache-Control': 'private, max-age=300',
-            'X-Content-Type-Options': 'nosniff',
+            'User-Agent': 'Mozilla/5.0',
+            'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
         },
     )
+    response = None
+    current = target
+    try:
+        for _ in range(4):
+            parsed_current = urllib.parse.urlsplit(current)
+            if parsed_current.scheme not in {'http', 'https'} or not _is_allowed_outlink_host(parsed_current.hostname or ''):
+                raise HTTPException(403, 'image redirect host is not allowed')
+
+            request = client.build_request('GET', current)
+            response = await client.send(request, stream=True)
+            if response.status_code in {301, 302, 303, 307, 308}:
+                location = response.headers.get('location')
+                await response.aclose()
+                response = None
+                if not location:
+                    raise HTTPException(502, 'image redirect missing location')
+                current = urllib.parse.urljoin(current, location)
+                continue
+            break
+        else:
+            raise HTTPException(502, 'too many image redirects')
+
+        if response is None:
+            raise HTTPException(502, 'image response unavailable')
+        if response.status_code != 200:
+            await response.aclose()
+            raise HTTPException(502, f'image fetch failed: HTTP {response.status_code}')
+
+        content_type = (response.headers.get('content-type') or '').split(';', 1)[0].strip().lower()
+        if not content_type.startswith('image/'):
+            await response.aclose()
+            raise HTTPException(415, 'upstream response is not an image')
+
+        async def stream():
+            try:
+                async for chunk in response.aiter_bytes(64 * 1024):
+                    yield chunk
+            finally:
+                await response.aclose()
+                await client.aclose()
+
+        return StreamingResponse(
+            stream(),
+            media_type=content_type,
+            headers={
+                'Cache-Control': 'private, max-age=300',
+                'X-Content-Type-Options': 'nosniff',
+            },
+        )
+    except HTTPException:
+        if response is not None:
+            await response.aclose()
+        await client.aclose()
+        raise
+    except httpx.HTTPError as exc:
+        if response is not None:
+            await response.aclose()
+        await client.aclose()
+        raise HTTPException(502, f'image fetch failed: {exc}')
 
 
 @app.get('/api/outlink')
