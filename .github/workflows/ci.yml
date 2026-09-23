@@ -52,7 +52,7 @@ jobs:
       - name: Download output resolution tests
         run: python -m pytest -q tests/test_download_output.py
       - name: Provider pytest suite
-        run: python -m pytest -q
+        run: python -m pytest -q -m "not live"
       - name: Zing MP3 live integration - search
         run: python scripts/test_zing_search.py
 
