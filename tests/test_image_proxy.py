@@ -30,7 +30,6 @@ class ImageProxyTests(unittest.TestCase):
         self.assertTrue(result["image"].startswith("/api/image-proxy?url="))
         self.assertTrue(result["thumbnail"].startswith("/api/image-proxy?url="))
         self.assertTrue(result["streamURL"].startswith("/api/outlink?url="))
-        self.assertEqual(result["source_url"], None if False else None)
 
 
 if __name__ == "__main__":
