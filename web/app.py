@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 import urllib.parse
 import httpx
 from fastapi import FastAPI, Form, Request, Header, HTTPException, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from database import db
@@ -282,6 +282,14 @@ OUTLINK_ALLOWED_HOSTS = {
     'youtube.com', 'www.youtube.com', 'youtu.be',
 }
 
+def _is_allowed_outlink_host(host: str) -> bool:
+    host = (host or '').lower().rstrip('.')
+    return host in OUTLINK_ALLOWED_HOSTS or any(
+        host.endswith('.' + suffix)
+        for suffix in ('zingmp3.vn', 'nhaccuatui.com', 'nct.vn', 'spotify.com', 'youtube.com')
+    )
+
+
 def _outlink_url(value: str) -> str:
     value = str(value or '').strip()
     if not value:
@@ -292,10 +300,25 @@ def _outlink_url(value: str) -> str:
         return ''
     if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
         return ''
-    host = (parsed.hostname or '').lower()
-    if host not in OUTLINK_ALLOWED_HOSTS and not any(host.endswith('.' + suffix) for suffix in ('zingmp3.vn', 'nhaccuatui.com', 'nct.vn', 'spotify.com', 'youtube.com')):
+    if not _is_allowed_outlink_host(parsed.hostname or ''):
         return ''
     return '/api/outlink?url=' + urllib.parse.quote(value, safe='')
+
+
+def _image_proxy_url(value: str) -> str:
+    value = str(value or '').strip()
+    if not value:
+        return ''
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError:
+        return ''
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        return ''
+    if not _is_allowed_outlink_host(parsed.hostname or ''):
+        return ''
+    return '/api/image-proxy?url=' + urllib.parse.quote(value, safe='')
+
 
 def _rewrite_outlinks(value):
     if isinstance(value, dict):
@@ -304,7 +327,9 @@ def _rewrite_outlinks(value):
             if key == 'url' and isinstance(item, str):
                 result['source_url'] = item
                 result[key] = _outlink_url(item) or item
-            elif key in {'image', 'thumbnail', 'thumbnailUrl', 'thumbnailM', 'streamURL', 'streamUrl', 'stream_url'} and isinstance(item, str):
+            elif key in {'image', 'thumbnail', 'thumbnailUrl', 'thumbnailM'} and isinstance(item, str):
+                result[key] = _image_proxy_url(item) or item
+            elif key in {'streamURL', 'streamUrl', 'stream_url'} and isinstance(item, str):
                 result[key] = _outlink_url(item) or item
             else:
                 result[key] = _rewrite_outlinks(item)
@@ -312,6 +337,68 @@ def _rewrite_outlinks(value):
     if isinstance(value, list):
         return [_rewrite_outlinks(item) for item in value]
     return value
+
+@app.get('/api/image-proxy')
+async def image_proxy(url: str):
+    """Stream an allowlisted remote image without storing it on the server."""
+    target = str(url or '').strip()
+    try:
+        parsed = urllib.parse.urlsplit(target)
+    except ValueError:
+        raise HTTPException(400, 'invalid image url')
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        raise HTTPException(400, 'invalid image url')
+    if not _is_allowed_outlink_host(parsed.hostname or ''):
+        raise HTTPException(403, 'image host is not allowed')
+
+    headers = {'User-Agent': 'Mozilla/5.0', 'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'}
+    client = httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0), follow_redirects=False, headers=headers)
+
+    async def stream():
+        current = target
+        try:
+            async with client:
+                for _ in range(4):
+                    parsed_current = urllib.parse.urlsplit(current)
+                    if parsed_current.scheme not in {'http', 'https'} or not _is_allowed_outlink_host(parsed_current.hostname or ''):
+                        raise HTTPException(403, 'image redirect host is not allowed')
+                    response = await client.stream('GET', current)
+                    if response.status_code in {301, 302, 303, 307, 308}:
+                        location = response.headers.get('location')
+                        await response.aclose()
+                        if not location:
+                            raise HTTPException(502, 'image redirect missing location')
+                        current = urllib.parse.urljoin(current, location)
+                        continue
+                    if response.status_code != 200:
+                        await response.aclose()
+                        raise HTTPException(502, f'image fetch failed: HTTP {response.status_code}')
+
+                    content_type = (response.headers.get('content-type') or '').split(';', 1)[0].strip().lower()
+                    if not content_type.startswith('image/'):
+                        await response.aclose()
+                        raise HTTPException(415, 'upstream response is not an image')
+
+                    try:
+                        async for chunk in response.aiter_bytes(64 * 1024):
+                            yield chunk
+                    finally:
+                        await response.aclose()
+                    return
+                raise HTTPException(502, 'too many image redirects')
+        finally:
+            if not client.is_closed:
+                await client.aclose()
+
+    return StreamingResponse(
+        stream(),
+        media_type='image/jpeg',
+        headers={
+            'Cache-Control': 'private, max-age=300',
+            'X-Content-Type-Options': 'nosniff',
+        },
+    )
+
 
 @app.get('/api/outlink')
 async def outlink(url: str):
@@ -323,7 +410,7 @@ async def outlink(url: str):
     if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
         raise HTTPException(400, 'invalid outlink')
     host = (parsed.hostname or '').lower()
-    if host not in OUTLINK_ALLOWED_HOSTS and not any(host.endswith('.' + suffix) for suffix in ('zingmp3.vn', 'nhaccuatui.com', 'nct.vn', 'spotify.com', 'youtube.com')):
+    if not _is_allowed_outlink_host(host):
         raise HTTPException(403, 'outlink host is not allowed')
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers={'User-Agent': 'Mozilla/5.0'}) as client:
