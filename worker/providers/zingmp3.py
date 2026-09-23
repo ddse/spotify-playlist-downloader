@@ -117,8 +117,8 @@ def _api(session, path, params, debug=None):
         message = data.get("msg") or "unknown error"
         if err_code == -1110 and path == "/api/v2/song/get/streaming":
             raise ZingMp3Error(
-                "Zing MP3 streaming API returned -1110: "
-                f"{message}. Search can still succeed because it uses a different endpoint. "
+                "Zing MP3 streaming API -1110: "
+                f"API returned -1110 ({message}). Search can still succeed because it uses a different endpoint. "
                 "See the download diagnostics for the exact endpoint, HTTP response, "
                 "and WireGuard state."
             )
