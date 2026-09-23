@@ -1,9 +1,10 @@
 import os, re, sqlite3, secrets, time, json, logging
 from pathlib import Path
 from urllib.parse import urlparse
+import urllib.parse
 import httpx
 from fastapi import FastAPI, Form, Request, Header, HTTPException, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from database import db
@@ -274,6 +275,66 @@ async def services():
         result['wireguard']['detail']=str(e)
     return result
 
+OUTLINK_ALLOWED_HOSTS = {
+    'zingmp3.vn', 'www.zingmp3.vn', 'nhaccuatui.com', 'www.nhaccuatui.com',
+    'nct.vn', 'www.nct.vn', 'image-cdn.nct.vn',
+    'spotify.com', 'open.spotify.com',
+    'youtube.com', 'www.youtube.com', 'youtu.be',
+}
+
+def _outlink_url(value: str) -> str:
+    value = str(value or '').strip()
+    if not value:
+        return ''
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError:
+        return ''
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        return ''
+    host = (parsed.hostname or '').lower()
+    if host not in OUTLINK_ALLOWED_HOSTS and not any(host.endswith('.' + suffix) for suffix in ('zingmp3.vn', 'nhaccuatui.com', 'nct.vn', 'spotify.com', 'youtube.com')):
+        return ''
+    return '/api/outlink?url=' + urllib.parse.quote(value, safe='')
+
+def _rewrite_outlinks(value):
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            if key == 'url' and isinstance(item, str):
+                result['source_url'] = item
+                result[key] = _outlink_url(item) or item
+            elif key in {'image', 'thumbnail', 'thumbnailUrl', 'thumbnailM', 'streamURL', 'streamUrl', 'stream_url'} and isinstance(item, str):
+                result[key] = _outlink_url(item) or item
+            else:
+                result[key] = _rewrite_outlinks(item)
+        return result
+    if isinstance(value, list):
+        return [_rewrite_outlinks(item) for item in value]
+    return value
+
+@app.get('/api/outlink')
+async def outlink(url: str):
+    target = str(url or '').strip()
+    try:
+        parsed = urllib.parse.urlsplit(target)
+    except ValueError:
+        raise HTTPException(400, 'invalid outlink')
+    if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+        raise HTTPException(400, 'invalid outlink')
+    host = (parsed.hostname or '').lower()
+    if host not in OUTLINK_ALLOWED_HOSTS and not any(host.endswith('.' + suffix) for suffix in ('zingmp3.vn', 'nhaccuatui.com', 'nct.vn', 'spotify.com', 'youtube.com')):
+        raise HTTPException(403, 'outlink host is not allowed')
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers={'User-Agent': 'Mozilla/5.0'}) as client:
+            response = await client.get(target)
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f'outlink fetch failed: {exc}')
+    content_type = (response.headers.get('content-type') or 'application/octet-stream').split(';', 1)[0].strip().lower()
+    if content_type.startswith('image/'):
+        return Response(content=response.content, media_type=content_type, headers={'Cache-Control': 'public, max-age=300'})
+    return RedirectResponse(str(response.url), status_code=307)
+
 @app.get('/api/spotify/login')
 def spotify_login(): return RedirectResponse(authorize_url())
 
@@ -309,7 +370,7 @@ async def search_spotify(q:str=''):
             'error':str(e),
         }
 
-    return {
+    return _rewrite_outlinks({
         'items':[
             {
                 'id':t['id'],
@@ -317,12 +378,13 @@ async def search_spotify(q:str=''):
                 'artists':', '.join(a['name'] for a in t['artists']),
                 'album':t['album']['name'],
                 'url':t['external_urls']['spotify'],
+                'source_url':t['external_urls']['spotify'],
                 'image':t['album']['images'][-1]['url'] if t['album']['images'] else '',
             }
             for t in result.get('tracks',{}).get('items',[])
         ],
         'available':True,
-    }
+    })
 
 @app.get('/api/search/youtube')
 async def search_youtube(q:str='',page:int=1,limit:int=10,debug:int=0):
