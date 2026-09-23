@@ -51,6 +51,29 @@ def test_nhaccuatui_api_search_normalizes_results(monkeypatch):
     assert result["items"][0]["url"] == "https://www.nhaccuatui.com/song/ABC123"
 
 
+def test_nhaccuatui_search_normalizes_object_artist(monkeypatch):
+    nct = load_provider("nhaccuatui")
+
+    def fake_api(path, params=None):
+        return {
+            "songs": [{
+                "key": "LX0XVH77VeER",
+                "name": "Hoa Vô Sắc",
+                "artist": {"name": "K-ICM"},
+                "image": "https://image-cdn.nct.vn/singer/avatar/example.jpg",
+            }]
+        }
+
+    monkeypatch.setattr(nct, "_api_request", fake_api)
+    result = nct.search("Hoa Vo Sac")
+
+    item = result["items"][0]
+    assert item["title"] == "Hoa Vô Sắc"
+    assert item["channel"] == "K-ICM"
+    assert isinstance(item["title"], str)
+    assert isinstance(item["channel"], str)
+
+
 def test_nhaccuatui_get_stream_url_preserves_exact_signed_url(monkeypatch):
     nct = load_provider("nhaccuatui")
     signed_url = (

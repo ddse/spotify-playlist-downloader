@@ -71,10 +71,20 @@ def search(query, page=1, limit=10):
 
         # Keep the public NCT page as the source URL. The signed stream URL is
         # intentionally resolved only at download time because it expires.
+        artist = song.get("artist") or song.get("artistName") or "NhacCuaTui"
+        if isinstance(artist, dict):
+            artist = artist.get("name") or artist.get("title") or artist.get("artistName") or "NhacCuaTui"
+        elif isinstance(artist, list):
+            artist = ", ".join(
+                str(a.get("name") or a.get("title") or a.get("artistName") or "").strip()
+                if isinstance(a, dict) else str(a).strip()
+                for a in artist if a
+            ) or "NhacCuaTui"
+
         items.append({
             "id": f"https://www.nhaccuatui.com/song/{key}",
-            "title": title,
-            "channel": song.get("artist") or song.get("artistName") or "NhacCuaTui",
+            "title": str(title),
+            "channel": str(artist),
             "duration": song.get("duration"),
             "url": f"https://www.nhaccuatui.com/song/{key}",
             "thumbnail": song.get("thumbnail") or song.get("image") or "",
