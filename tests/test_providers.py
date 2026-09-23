@@ -121,18 +121,26 @@ def test_zingmp3_streaming_prefers_128(monkeypatch):
 
 def test_nhaccuatui_parser_supports_current_song_links(monkeypatch):
     nct = load_provider("nhaccuatui")
-    html = '''
-      <a href="https://www.nhaccuatui.com/song/4ZPNUOHU7t?source=app"><span>Việt Nam Quê Hương Tôi</span></a>
-      <a href="https://www.nhaccuatui.com/song/4ZPNUOHU7t?source=app"><span>duplicate</span></a>
-    '''
+    payload = {
+        "success": True,
+        "data": {
+            "songs": [{"key": "4ZPNUOHU7t", "name": "Việt Nam Quê Hương Tôi"}],
+        },
+    }
+
     class Response:
-        def read(self): return html.encode('utf-8')
+        headers = {}
+        def read(self):
+            import json
+            return json.dumps(payload).encode("utf-8")
         def __enter__(self): return self
         def __exit__(self, *args): pass
+
     monkeypatch.setattr(nct.urllib.request, "urlopen", lambda *a, **k: Response())
     result = nct.search("Việt nam quê hương tôi")
     assert len(result["items"]) == 1
     assert result["items"][0]["title"] == "Việt Nam Quê Hương Tôi"
+    assert result["items"][0]["url"] == "https://www.nhaccuatui.com/song/4ZPNUOHU7t"
 
 
 def test_zingmp3_search_debug_trace(monkeypatch):
