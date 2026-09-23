@@ -1,6 +1,10 @@
 import importlib.util
 import pathlib
+import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+WORKER = ROOT / "worker"
+if str(WORKER) not in sys.path:
+    sys.path.insert(0, str(WORKER))
 
 def load_provider(name):
     spec = importlib.util.spec_from_file_location(
@@ -26,33 +30,63 @@ def test_zingmp3_search_input_is_safely_encoded():
     assert "q=a+song+%26+artist+%2F+test" in url
 
 
-def test_nhaccuatui_parser_normalizes_results(monkeypatch):
+def test_nhaccuatui_api_search_normalizes_results(monkeypatch):
     nct = load_provider("nhaccuatui")
-    payload = {
-        "success": True,
-        "data": {
+
+    def fake_api(path, params=None):
+        assert path == "/api/v1/search/song"
+        assert params["keyword"] == "test"
+        return {
             "songs": [
-                {"key": "TEST123", "name": "Test Song"},
-                {"key": "TEST123", "name": "duplicate"},
+                {"key": "ABC123", "name": "Test Song", "artist": "Artist"},
+                {"key": "DEF456", "title": "Second Song"},
             ]
-        },
-    }
+        }
 
-    class Response:
-        headers = {}
-        def read(self):
-            import json
-            return json.dumps(payload).encode("utf-8")
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-
-    monkeypatch.setattr(nct.urllib.request, "urlopen", lambda *a, **k: Response())
+    monkeypatch.setattr(nct, "_api_request", fake_api)
     result = nct.search("test")
     assert len(result["items"]) == 2
     assert result["items"][0]["source"] == "nhaccuatui"
     assert result["items"][0]["title"] == "Test Song"
-    assert result["items"][0]["url"] == "https://www.nhaccuatui.com/song/TEST123"
-    assert result["items"][1]["url"] == "https://www.nhaccuatui.com/song/TEST123"
+    assert result["items"][0]["url"] == "https://www.nhaccuatui.com/song/ABC123"
+
+
+def test_nhaccuatui_get_stream_url_preserves_exact_signed_url(monkeypatch):
+    nct = load_provider("nhaccuatui")
+    signed_url = (
+        "https://a01.nct.vn/audio/HoaVoSac.mp3"
+        "?e=1780000000&sig=abc123&token=xyz"
+    )
+
+    def fake_api(path, params=None):
+        assert path == "/api/v1/song/detail/ABC123"
+        return {
+            "key": "ABC123",
+            "name": "Hoa Vo Sac",
+            "streamURL": signed_url,
+        }
+
+    monkeypatch.setattr(nct, "_api_request", fake_api)
+    assert nct.get_stream_url("https://www.nhaccuatui.com/song/ABC123") == signed_url
+
+
+def test_nhaccuatui_get_stream_url_prefers_320_when_exposed(monkeypatch):
+    nct = load_provider("nhaccuatui")
+    signed_320 = "https://a01.nct.vn/audio/320.mp3?e=1780000000&sig=abc"
+
+    def fake_api(path, params=None):
+        return {
+            "key": "ABC123",
+            "streams": {
+                "128": "https://a01.nct.vn/audio/128.mp3?e=1780000000&sig=low",
+                "320": signed_320,
+            },
+        }
+
+    monkeypatch.setattr(nct, "_api_request", fake_api)
+    assert nct.get_stream_url("ABC123") == signed_320
+
+
 def test_zingmp3_signed_search_filters_albums(monkeypatch):
     zing = load_provider("zingmp3")
     calls = []
@@ -237,7 +271,9 @@ def test_zingmp3_streaming_error_trace_identifies_endpoint(monkeypatch):
 
 
 def test_search_sources_follow_wireguard_setting(monkeypatch):
-    import worker.search as module
+    search_mod = importlib.util.spec_from_file_location("worker_search", ROOT / "worker" / "search.py")
+    module = importlib.util.module_from_spec(search_mod)
+    search_mod.loader.exec_module(module)
 
     calls = []
 
