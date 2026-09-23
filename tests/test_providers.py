@@ -121,18 +121,13 @@ def test_zingmp3_streaming_prefers_128(monkeypatch):
 
 def test_nhaccuatui_parser_supports_current_song_links(monkeypatch):
     nct = load_provider("nhaccuatui")
-    payload = {
-        "success": True,
-        "data": {
-            "songs": [{"key": "4ZPNUOHU7t", "name": "Việt Nam Quê Hương Tôi"}],
-        },
-    }
+    html = '''
+      <a href="https://www.nhaccuatui.com/song/4ZPNUOHU7t">Việt Nam Quê Hương Tôi</a>
+    '''
 
     class Response:
-        headers = {}
         def read(self):
-            import json
-            return json.dumps(payload).encode("utf-8")
+            return html.encode("utf-8")
         def __enter__(self): return self
         def __exit__(self, *args): pass
 
