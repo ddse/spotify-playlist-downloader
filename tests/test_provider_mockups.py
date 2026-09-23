@@ -22,20 +22,18 @@ def load_provider(name):
 def test_nhaccuatui_search_is_fully_mocked(monkeypatch):
     nct = load_provider("nhaccuatui")
     captured = {}
-    payload = {"success": True, "data": {"songs": [
-        {"key": "MOCK123", "name": "Mock Song"},
-        {"key": "OTHER123", "name": "Other Song"},
-    ]}}
+    html = """
+      <a href="https://www.nhaccuatui.com/song/MOCK123">Mock Song</a>
+      <a href="https://www.nhaccuatui.com/song/OTHER123">Other Song</a>
+    """
 
     class Response:
-        headers = {}
         def read(self):
-            import json
-            return json.dumps(payload).encode("utf-8")
+            return html.encode("utf-8")
         def __enter__(self): return self
         def __exit__(self, *args): return None
 
-    def fake_urlopen(request, timeout=30):
+    def fake_urlopen(request, timeout=20):
         captured["url"] = request.full_url
         captured["headers"] = dict(request.header_items())
         captured["timeout"] = timeout
@@ -44,9 +42,9 @@ def test_nhaccuatui_search_is_fully_mocked(monkeypatch):
     monkeypatch.setattr(nct.urllib.request, "urlopen", fake_urlopen)
     result = nct.search("mock & song", page=1, limit=10)
 
-    assert captured["url"].startswith("https://graph.nct.vn/api/v1/search/song?")
-    assert "keyword=mock+%26+song" in captured["url"]
-    assert captured["timeout"] == 30
+    assert captured["url"] == "https://www.nhaccuatui.com/tim-kiem?q=mock%20%26%20song"
+    assert captured["timeout"] == 20
+    assert "User-agent" in captured["headers"] or "User-Agent" in captured["headers"]
     assert len(result["items"]) == 2
     assert result["items"][0]["title"] == "Mock Song"
     assert result["items"][0]["id"] == "https://www.nhaccuatui.com/song/MOCK123"
