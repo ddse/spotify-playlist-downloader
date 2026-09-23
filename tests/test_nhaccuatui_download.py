@@ -18,11 +18,13 @@ STREAM_320 = "https://cdn.example.test/resa/song-320.mp3?token=320"
 
 def test_search_keyword_returns_input_song_link(monkeypatch):
     nct = load_provider()
-    html = '<a href="https://www.nhaccuatui.com/song/LX0XVH77VeER">Hoa Vô Sắc</a>'
+    payload = {"success": True, "data": {"songs": [{"key": "LX0XVH77VeER", "name": "Hoa Vô Sắc"}]}}
 
     class Response:
+        headers = {}
         def read(self):
-            return html.encode("utf-8")
+            import json
+            return json.dumps(payload).encode("utf-8")
         def __enter__(self): return self
         def __exit__(self, *args): pass
 
