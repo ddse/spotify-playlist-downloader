@@ -28,23 +28,31 @@ def test_zingmp3_search_input_is_safely_encoded():
 
 def test_nhaccuatui_parser_normalizes_results(monkeypatch):
     nct = load_provider("nhaccuatui")
-    html = '''
-      <a href="https://www.nhaccuatui.com/bai-hat/test-song.XYZ.html">Test <b>Song</b></a>
-      <a href="https://www.nhaccuatui.com/bai-hat/test-song.XYZ.html">duplicate</a>
-    '''
+    payload = {
+        "success": True,
+        "data": {
+            "songs": [
+                {"key": "TEST123", "name": "Test Song"},
+                {"key": "TEST123", "name": "duplicate"},
+            ]
+        },
+    }
 
     class Response:
-        def read(self): return html.encode('utf-8')
+        headers = {}
+        def read(self):
+            import json
+            return json.dumps(payload).encode("utf-8")
         def __enter__(self): return self
         def __exit__(self, *args): pass
 
     monkeypatch.setattr(nct.urllib.request, "urlopen", lambda *a, **k: Response())
     result = nct.search("test")
-    assert len(result["items"]) == 1
+    assert len(result["items"]) == 2
     assert result["items"][0]["source"] == "nhaccuatui"
     assert result["items"][0]["title"] == "Test Song"
-
-
+    assert result["items"][0]["url"] == "https://www.nhaccuatui.com/song/TEST123"
+    assert result["items"][1]["url"] == "https://www.nhaccuatui.com/song/TEST123"
 def test_zingmp3_signed_search_filters_albums(monkeypatch):
     zing = load_provider("zingmp3")
     calls = []
