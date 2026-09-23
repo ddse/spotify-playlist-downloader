@@ -72,6 +72,14 @@ class WireGuardManagerTests(unittest.TestCase):
         self.tmp.cleanup()
 
 
+    def test_is_up_returns_false_when_wg_binary_is_missing(self):
+        with patch.object(
+            self.wireguard.subprocess,
+            "run",
+            side_effect=FileNotFoundError(2, "No such file or directory", "wg"),
+        ):
+            self.assertFalse(self.wireguard.is_up())
+
     def test_run_does_not_toggle_global_interface(self):
         with patch.object(self.wireguard, "set_enabled") as set_enabled:
             result = self.wireguard.run(True, lambda: "ok")
