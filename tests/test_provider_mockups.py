@@ -54,7 +54,7 @@ def test_nhaccuatui_search_is_fully_mocked(monkeypatch):
     result = nct.search("mock & song", page=1, limit=10)
 
     assert captured["url"] == (
-        "https://www.nhaccuatui.com/tim-kiem?q=mock+%26+song"
+        "https://www.nhaccuatui.com/tim-kiem?q=mock%20%26%20song"
     )
     assert captured["timeout"] == 20
     assert len(result["items"]) == 2
@@ -256,7 +256,7 @@ def test_zingmp3_invalid_json_is_reported(monkeypatch):
 
 
 def test_search_wireguard_policy_is_mocked():
-    module = load_module("mock_search", pathlib.Path("worker") / "search.py")
+    import worker.search as module
     calls = []
 
     def fake_run(enabled, func):
