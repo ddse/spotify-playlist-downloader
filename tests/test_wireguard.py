@@ -72,6 +72,33 @@ class WireGuardManagerTests(unittest.TestCase):
         self.tmp.cleanup()
 
 
+    def test_database_config_is_used_and_materialized_without_exposing_contents(self):
+        original = self.wireguard._db_config
+        self.wireguard._db_config = lambda: "[Interface]\nPrivateKey = secret\nAddress = 10.0.0.2/24"
+        try:
+            self.assertTrue(self.wireguard.config_configured())
+            with patch.object(self.wireguard.os, "chmod") as chmod:
+                path = self.wireguard._materialize_config()
+            self.assertEqual(Path(path).read_text(), "[Interface]\nPrivateKey = secret\nAddress = 10.0.0.2/24\n")
+            chmod.assert_called_once_with(path, 0o600)
+            result = self.wireguard.status.__wrapped__ if hasattr(self.wireguard.status, "__wrapped__") else None
+            self.assertEqual(self.wireguard.config_content().splitlines()[1], "PrivateKey = secret")
+        finally:
+            self.wireguard._db_config = original
+            try:
+                os.remove(self.wireguard.RUNTIME_CONFIG)
+            except OSError:
+                pass
+
+    def test_status_reports_database_as_config_source(self):
+        with patch.object(self.wireguard, "is_up", return_value=False), \
+             patch.object(self.wireguard, "_db_config", return_value="[Interface]\nPrivateKey = secret"), \
+             patch.object(self.wireguard, "_legacy_config", return_value=""):
+            result = self.wireguard.status()
+        self.assertTrue(result["config_exists"])
+        self.assertEqual(result["config_source"], "database")
+        self.assertNotIn("PrivateKey = secret", str(result))
+
     def test_is_up_returns_false_when_wg_binary_is_missing(self):
         with patch.object(
             self.wireguard.subprocess,
