@@ -637,15 +637,15 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
     c.commit(); c.close()
     return {'ok': True, 'id': key, 'status': 'queued'}
 
-@app.post('/api/queue/{track_id}/start')
+@app.post('/api/queue/{track_id:path}/start')
 def start_queue(track_id:str):
     c=db(); c.execute("UPDATE tracks SET auto_start=1,status=CASE WHEN status IN ('paused','queued') THEN 'queued' ELSE status END,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status IN ('paused','queued')",(track_id,)); c.commit(); c.close(); return {'ok':True}
 
-@app.post('/api/queue/{track_id}/pause')
+@app.post('/api/queue/{track_id:path}/pause')
 def pause_queue(track_id:str):
     c=db(); cur=c.execute("UPDATE tracks SET auto_start=0,status='paused',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status='queued'",(track_id,)); c.commit(); c.close(); return {'ok':cur.rowcount>0}
 
-@app.post('/api/queue/prioritize/{track_id}')
+@app.post('/api/queue/prioritize/{track_id:path}')
 def prioritize_queue(track_id:str):
     c=db(); c.execute("UPDATE tracks SET priority=priority+1,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status IN ('queued','paused')",(track_id,)); c.commit(); c.close(); return {'ok':True}
 
@@ -686,7 +686,7 @@ def queue_bulk(action:str=Form(...),ids:str=Form('')):
     c.commit(); c.close()
     return {'ok':True}
 
-@app.delete('/api/files/{track_id}')
+@app.delete('/api/files/{track_id:path}')
 def remove_file(track_id:str):
     c=db()
     row=c.execute("SELECT * FROM tracks WHERE spotify_id=?", (track_id,)).fetchone()
@@ -707,11 +707,19 @@ def remove_file(track_id:str):
     c.close()
     return {'ok':True}
 
-@app.post('/api/retry/{track_id}')
+@app.post('/api/retry/{track_id:path}')
 def retry(track_id:str):
-    c=db(); c.execute("UPDATE tracks SET status='queued',progress=0,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status='failed'",(track_id,)); c.commit(); c.close(); return {'ok':True}
+    c=db()
+    cur=c.execute(
+        "UPDATE tracks SET status='queued',progress=0,error=NULL,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP "
+        "WHERE spotify_id=? AND status IN ('failed','completed')",
+        (track_id,),
+    )
+    c.commit()
+    c.close()
+    return {'ok':cur.rowcount>0}
 
-@app.delete('/api/queue/{track_id}')
+@app.delete('/api/queue/{track_id:path}')
 def delete_queue(track_id:str):
     c=db(); cur=c.execute("DELETE FROM tracks WHERE spotify_id=? AND status IN ('queued','failed','pending_source')",(track_id,)); c.commit(); c.close(); return {'ok':cur.rowcount>0}
 
@@ -762,7 +770,7 @@ def jobs():
 def history():
     c=db(); rows=c.execute("SELECT * FROM tracks WHERE status IN ('completed','failed') ORDER BY updated_at DESC LIMIT 200").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
 
-@app.get('/api/files/{track_id}')
+@app.get('/api/files/{track_id:path}')
 def download_file(track_id:str, download:bool=Query(False)):
     c=db()
     row=c.execute("SELECT * FROM tracks WHERE spotify_id=? AND status='completed'", (track_id,)).fetchone()
