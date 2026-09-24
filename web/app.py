@@ -1,9 +1,9 @@
-import os, re, sqlite3, secrets, time, json, logging
+import os, re, sqlite3, secrets, time, json, logging, asyncio
 from pathlib import Path
 from urllib.parse import urlparse
 import urllib.parse
 import httpx
-from fastapi import FastAPI, Form, Request, Header, HTTPException, Query
+from fastapi import FastAPI, Form, Request, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -19,15 +19,17 @@ logger.info('Web logging initialized debug=%s log_level=%s', DEBUG_MODE, LOG_LEV
 DB_PATH=os.getenv('DB_PATH','/state/app.db'); SYNC_TOKEN=os.getenv('SYNC_TOKEN','')
 WIREGUARD_ENV_DEFAULT=os.getenv('WIREGUARD_DEFAULT','0') in {'1','true','yes','on'}
 
-def wireguard_enabled():
-    c=db(); row=c.execute("SELECT value FROM app_settings WHERE key='wireguard_enabled'").fetchone()
-    if row is None:
-        value=1 if WIREGUARD_ENV_DEFAULT else 0
-        c.execute("INSERT OR IGNORE INTO app_settings(key,value) VALUES('wireguard_enabled',?)",(str(value),)); c.commit()
-    else:
-        value=row['value'] == '1'
-    c.close(); return value
+async def wireguard_enabled():
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
+            response.raise_for_status()
+            return bool(response.json().get('enabled'))
+    except Exception:
+        return False
+
 app=FastAPI(title='Music Downloader v3'); templates=Jinja2Templates(directory='templates')
+app.state.wireguard_clients=set(); app.state.wireguard_last=None
 # Keep module imports usable for unit tests and tooling that do not build the
 # frontend assets. The production image still mounts the directory when it is
 # present.
@@ -65,7 +67,48 @@ def worker_state(c, service):
     age=time.time()-r['heartbeat'];return {'status':'online' if age<30 else 'offline','age':round(age,1),'detail':r['detail'] or ''}
 
 @app.on_event('startup')
-def startup(): db().close()
+async def startup():
+    db().close()
+    async def broadcaster():
+        while True:
+            try:
+                async with httpx.AsyncClient(timeout=3) as client:
+                    response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
+                    response.raise_for_status(); wg=response.json()
+                payload={'type':'wireguard',**wg,'requested_enabled':bool(wg.get('enabled'))}
+                fingerprint=json.dumps(payload,sort_keys=True)
+                if fingerprint != app.state.wireguard_last:
+                    app.state.wireguard_last=fingerprint
+                    for ws in list(app.state.wireguard_clients):
+                        try: await ws.send_json(payload)
+                        except Exception: app.state.wireguard_clients.discard(ws)
+            except Exception:
+                payload={'type':'wireguard','enabled':False,'requested_enabled':False,'status':'unavailable','status_detail':'WireGuard worker status unavailable'}
+                fingerprint=json.dumps(payload,sort_keys=True)
+                if fingerprint != app.state.wireguard_last:
+                    app.state.wireguard_last=fingerprint
+                    for ws in list(app.state.wireguard_clients):
+                        try: await ws.send_json(payload)
+                        except Exception: app.state.wireguard_clients.discard(ws)
+            await asyncio.sleep(1)
+    asyncio.create_task(broadcaster())
+
+@app.websocket('/ws/wireguard')
+async def wireguard_socket(websocket: WebSocket):
+    await websocket.accept()
+    app.state.wireguard_clients.add(websocket)
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
+            response.raise_for_status(); wg=response.json()
+        await websocket.send_json({'type':'wireguard',**wg,'requested_enabled':bool(wg.get('enabled'))})
+        while True: await websocket.receive_text()
+    except WebSocketDisconnect:
+        app.state.wireguard_clients.discard(websocket)
+    except Exception:
+        app.state.wireguard_clients.discard(websocket)
+
+
 
 @app.get('/',response_class=HTMLResponse)
 def index():
@@ -86,7 +129,7 @@ async def debug_status():
 @app.get('/api/health')
 async def api_health():
     logger.debug('Health check requested')
-    c=db(); w=worker_state(c,'worker'); s=worker_state(c,'scheduler'); c.close(); return {'ok':True,'spotify_connected':bool(await access_token()),'worker':w,'scheduler':s,'wireguard':wireguard_enabled()}
+    c=db(); w=worker_state(c,'worker'); s=worker_state(c,'scheduler'); c.close(); return {'ok':True,'spotify_connected':bool(await access_token()),'worker':w,'scheduler':s,'wireguard':await wireguard_enabled()}
 
 PROVIDER_DEFAULTS = {
     'spotify': {'client_id':'', 'client_secret':'', 'redirect_uri':'http://localhost:8088/api/spotify/callback'},
@@ -125,12 +168,12 @@ async def wireguard_settings():
     configured = wireguard_configured()
     result = {
         'enabled': wireguard_enabled(),
-        'requested_enabled': wireguard_enabled(),
+        'requested_enabled': False,
         'interface': os.getenv('WG_INTERFACE', 'wg0'),
         'config_path': 'database://wireguard_config',
         'config_exists': configured,
         'configured': configured,
-        'status': 'connecting' if wireguard_enabled() else ('disconnected' if configured else 'unavailable'),
+        'status': 'disconnected' if configured else 'unavailable',
     }
     try:
         async with httpx.AsyncClient(timeout=8) as client:
@@ -141,7 +184,7 @@ async def wireguard_settings():
             wg = response.json()
             result.update({
                 'enabled': bool(wg.get('enabled')),
-                'requested_enabled': wireguard_enabled(),
+                'requested_enabled': bool(wg.get('enabled')),
                 'interface': wg.get('interface', 'wg0'),
                 'config_path': 'database://wireguard_config',
                 'config_exists': configured,
@@ -157,7 +200,7 @@ async def wireguard_settings():
                 'peer_count': int(wg.get('peer_count', 0)),
             })
     except Exception as e:
-        result['requested_enabled'] = wireguard_enabled()
+        result['requested_enabled'] = False
         result['status'] = 'connecting' if result['requested_enabled'] else ('disconnected' if configured else 'unavailable')
         result['detail'] = str(e)
     return result
@@ -176,19 +219,12 @@ async def wireguard_save(request: Request):
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (config,),
         )
-    if enabled is not None:
-        value = '1' if bool(enabled) else '0'
-        c.execute(
-            "INSERT INTO app_settings(key,value) VALUES('wireguard_enabled',?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (value,),
-        )
     c.commit()
     c.close()
     return {
         'ok': True,
         'configured': wireguard_configured(),
-        'requested_enabled': wireguard_enabled(),
+        'requested_enabled': enabled,
         'config_path': 'database://wireguard_config',
         'message': 'WireGuard configuration saved. The configuration is write-only from the UI.',
     }
@@ -197,19 +233,10 @@ async def wireguard_save(request: Request):
 @app.post('/api/settings/wireguard')
 async def wireguard_toggle(enabled: bool = Form(...)):
     """Persist and apply the WireGuard preference through the worker."""
-    c = db()
     value = '1' if enabled else '0'
     configured = wireguard_configured()
     if enabled and not configured:
-        c.close()
         raise HTTPException(400, 'Save a WireGuard configuration before enabling it')
-    c.execute(
-        "INSERT INTO app_settings(key,value) VALUES('wireguard_enabled',?) "
-        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (value,),
-    )
-    c.commit()
-    c.close()
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.post(
@@ -559,7 +586,7 @@ async def search_youtube(q:str='',page:int=1,limit:int=10,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
     try:
         return _search_result_for_ui(
-            await youtube_search(q,page=page,limit=limit,wireguard=wireguard_enabled(),debug=bool(debug))
+            await youtube_search(q,page=page,limit=limit,wireguard=await wireguard_enabled(),debug=bool(debug))
         )
     except Exception as e:
         return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
