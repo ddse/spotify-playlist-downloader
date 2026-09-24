@@ -32,7 +32,7 @@ export default function Settings({onClose}) {
     const refreshWireguard=()=>api('/api/settings/wireguard').then(setWireguard).catch(e=>setWireguard(x=>({...x,status:'unavailable',detail:e.message})));
     refreshWireguard();
     let ws; let stopped=false;
-    const connect=()=>{if(stopped)return;const proto=location.protocol==='https:'?'wss':'ws';ws=new WebSocket(proto+'://'+location.host+'/ws/wireguard');ws.onmessage=e=>{try{const d=JSON.parse(e.data);if(d.type==='wireguard')setWireguard(d)}catch{}};ws.onclose=()=>{if(!stopped)setTimeout(connect,1500)};ws.onerror=()=>{try{ws.close()}catch{}};connect();
+    const connect=()=>{if(stopped)return;const proto=location.protocol==='https:'?'wss':'ws';ws=new WebSocket(proto+'://'+location.host+'/ws/wireguard');ws.onmessage=e=>{try{const d=JSON.parse(e.data);if(d.type==='wireguard')setWireguard(d)}catch{}};ws.onclose=()=>{if(!stopped)setTimeout(connect,1500)};ws.onerror=()=>{try{ws.close()}catch{}};connect();};
     return()=>{stopped=true;try{ws?.close()}catch{}};
   },[]);
   const p=PROVIDERS.find(x=>x.id===selected);
