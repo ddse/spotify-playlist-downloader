@@ -375,8 +375,12 @@ def _rewrite_outlinks(value):
             if key == 'url' and isinstance(item, str):
                 result['source_url'] = item
                 result[key] = _outlink_url(item) or item
-            elif key in {'image', 'thumbnail', 'thumbnailUrl', 'thumbnailM'} and isinstance(item, str):
-                result[key] = _image_proxy_url(item) or item
+            elif key in {'image', 'thumbnail', 'thumbnailUrl', 'thumbnailM', 'imageUrl', 'image_url', 'cover', 'coverUrl', 'cover_url', 'avatar', 'avatarUrl', 'avatar_url'} and isinstance(item, str):
+                # Image URLs are never exposed directly to the UI. Allowed remote
+                # images are streamed through /api/image-proxy; unsupported image
+                # hosts are blanked instead of leaking a direct URL.
+                result[key] = _image_proxy_url(item) if urllib.parse.urlsplit(item).scheme in {'http', 'https'} else item
+
             elif key in {'streamURL', 'streamUrl', 'stream_url'} and isinstance(item, str):
                 result[key] = _outlink_url(item) or item
             else:
