@@ -54,13 +54,11 @@ services:
       WORKER_SERVICE_NAME: worker
       DEBUG: ${DEBUG:-0}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      WG_CONFIG: /etc/wireguard/wg0.conf
     volumes:
       - ./worker:/app
       - ./database.py:/app/database.py
       - ${MUSIC_DIR:-./music}:/music
       - ./state:/state
-      - ./wireguard:/etc/wireguard:ro
       - /lib/modules:/lib/modules:ro
     expose:
       - "8090"
