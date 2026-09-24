@@ -115,6 +115,24 @@ class WireGuardManagerTests(unittest.TestCase):
         # The module reads the shared app_settings table; a missing row falls back to runtime state.
         self.assertFalse(self.wireguard.setting_enabled())
 
+    def test_set_enabled_persists_preference(self):
+        with patch.object(self.wireguard, "_persist_enabled") as persist:
+            with patch.object(self.wireguard, "is_up", return_value=True):
+                self.wireguard.set_enabled(True)
+                self.wireguard.set_enabled(False)
+        persist.assert_any_call(True)
+        persist.assert_any_call(False)
+
+    def test_restore_persisted_state_starts_wireguard(self):
+        with patch.object(self.wireguard, "setting_enabled", return_value=True),              patch.object(self.wireguard, "set_enabled") as set_enabled:
+            self.assertTrue(self.wireguard.restore_persisted_state())
+            import time
+            for _ in range(20):
+                if set_enabled.called:
+                    break
+                time.sleep(0.01)
+            set_enabled.assert_called_once_with(True)
+
     def test_run_does_not_toggle_global_interface(self):
         with patch.object(self.wireguard, "set_enabled") as set_enabled:
             result = self.wireguard.run(True, lambda: "ok")
