@@ -308,7 +308,7 @@ async def test_provider_connection(provider:str):
 async def services():
     c=db(); result={k:worker_state(c,k) for k in ('worker','scheduler')}; c.close()
     result['wireguard']={
-        'enabled': wireguard_enabled(),
+        'enabled': await wireguard_enabled(),
         'interface': os.getenv('WG_INTERFACE','wg0'),
         'config_path': os.getenv('WG_CONFIG','/etc/wireguard/wg0.conf'),
         'config_exists': False,
