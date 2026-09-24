@@ -707,7 +707,7 @@ def remove_file(track_id:str):
     c.close()
     return {'ok':True}
 
-@app.post('/api/retry/{track_id}')
+@app.post('/api/retry/{track_id:path}')
 def retry(track_id:str):
     c=db(); c.execute("UPDATE tracks SET status='queued',progress=0,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status='failed'",(track_id,)); c.commit(); c.close(); return {'ok':True}
 
