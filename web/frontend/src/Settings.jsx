@@ -27,12 +27,10 @@ export default function Settings({onClose}) {
   const [wireguardConfig,setWireguardConfig]=useState('');
   const [savingWireguard,setSavingWireguard]=useState(false);
   const [togglingWireguard,setTogglingWireguard]=useState(false);
-  const [debugStatus,setDebugStatus]=useState(null);
   useEffect(()=>{
     api('/api/settings/connections').then(d=>setItems(d.items||{})).catch(e=>setMessage(e.message));
     const refreshWireguard=()=>api('/api/settings/wireguard').then(setWireguard).catch(e=>setWireguard(x=>({...x,status:'unavailable',detail:e.message})));
     refreshWireguard();
-    api('/api/debug').then(setDebugStatus).catch(()=>setDebugStatus(null));
     const timer=setInterval(refreshWireguard,3000);
     return()=>clearInterval(timer);
   },[]);
@@ -42,25 +40,14 @@ export default function Settings({onClose}) {
   const set=(k,v)=>setItems(x=>({...x,[selected]:{...item,config:{...(x[selected]?.config||{}),[k]:v}}}));
   const save=async()=>{setSaving(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:item.enabled,config})});setItems(x=>({...x,[selected]:d}));setMessage('Saved. No restart required.')}catch(e){setMessage(e.message)}finally{setSaving(false)}};
   const saveWireguard=async()=>{setSavingWireguard(true);setMessage('');try{const d=await api('/api/settings/wireguard',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({config:wireguardConfig})});setWireguard(x=>({...x,...d,config_exists:d.configured}));setWireguardConfig('');setMessage('WireGuard configuration saved. It will not be shown again.')}catch(e){setMessage(e.message)}finally{setSavingWireguard(false)}};
-  const toggleWireguard=async(enabled)=>{setTogglingWireguard(true);setMessage('');try{const fd=new FormData();fd.append('enabled',enabled?'1':'0');const d=await api('/api/settings/wireguard',{method:'POST',body:fd});setWireguard(d);localStorage.setItem('music-wireguard',enabled?'1':'0');window.dispatchEvent(new Event('wireguard-setting'));setMessage(enabled?'WireGuard connecting...':'WireGuard disconnecting...')}catch(e){setMessage(e.message)}finally{setTogglingWireguard(false)}};
+  const toggleWireguard=async(enabled)=>{setTogglingWireguard(true);setMessage('');setWireguard(x=>({...x,requested_enabled:enabled}));try{const fd=new FormData();fd.append('enabled',enabled?'1':'0');const d=await api('/api/settings/wireguard',{method:'POST',body:fd});setWireguard(x=>({...x,...d,requested_enabled:enabled}));localStorage.setItem('music-wireguard',enabled?'1':'0');window.dispatchEvent(new Event('wireguard-setting'));setMessage(enabled?'WireGuard connecting...':'WireGuard disconnecting...')}catch(e){setWireguard(x=>({...x,requested_enabled:!enabled}));setMessage(e.message)}finally{setTogglingWireguard(false)}};
   const test=async()=>{setTesting(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected+'/test',{method:'POST'});setMessage(d.ok?'Connection test successful':(d.error||'Connection test failed'));setItems(x=>({...x,[selected]:{...x[selected],status:d.status,error:d.error||''}}));}catch(e){setMessage(e.message)}finally{setTesting(false)}};
   return <div className="glass mt-4 rounded-2xl p-5">
     <div className="flex items-center justify-between border-b border-white/10 pb-4"><div><h2 className="text-lg font-semibold">Provider Connections</h2><p className="text-xs text-zinc-500">Settings are stored in the application database and applied at runtime.</p></div><button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-2 text-sm">Close</button></div>
     <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div><h3 className="font-medium">Debug logging</h3><p className="text-xs text-zinc-500">Controlled by the Docker environment variable DEBUG.</p></div>
-        <span className={'rounded-lg border px-3 py-1.5 text-xs '+(debugStatus?.debug?'border-emerald-500/30 text-emerald-300':'border-white/10 text-zinc-400')}>{debugStatus?.debug?'enabled':'disabled'}</span>
-      </div>
-      <div className="mt-3 grid gap-2 text-xs text-zinc-400 md:grid-cols-2">
-        <div>Log level: <span className="text-zinc-200">{debugStatus?.log_level||'—'}</span></div>
-        <div>Docker: <code className="text-zinc-200">docker compose logs -f worker web scheduler</code></div>
-      </div>
-      <p className="mt-2 text-xs text-zinc-500">Set <code>DEBUG=1</code> in <code>.env</code>, then recreate the containers. Debug output includes provider resolution, HTTP responses, download stages and failures.</p>
-    </div>
-    <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h3 className="font-medium">WireGuard</h3><p className="text-xs text-zinc-500">Configuration is stored in the application database. The saved configuration is write-only and is never returned to the UI.</p></div>
-        <div className="flex items-center gap-2"><span className="rounded-lg border border-white/10 px-3 py-1.5 text-xs">{wireguard?.status||'loading'}</span><button onClick={()=>toggleWireguard(!wireguard?.requested_enabled)} disabled={togglingWireguard||wireguard===null||!wireguard?.configured||wireguard?.status==='connecting'||wireguard?.status==='disconnecting'} className={'rounded-lg px-3 py-1.5 text-xs text-white '+(wireguard?.requested_enabled?'bg-red-600 hover:bg-red-500':'bg-emerald-600 hover:bg-emerald-500')}>{togglingWireguard?'Applying...':wireguard?.requested_enabled?'Disable':'Enable'}</button></div>
+        <div className="flex items-center gap-2"><span className="rounded-lg border border-white/10 px-3 py-1.5 text-xs">{wireguard?.status||'loading'}</span><button type="button" onClick={()=>toggleWireguard(!wireguard?.requested_enabled)} disabled={togglingWireguard||wireguard===null||(!wireguard?.requested_enabled&&!wireguard?.configured)} className={'rounded-lg px-3 py-1.5 text-xs text-white '+(wireguard?.requested_enabled?'bg-red-600 hover:bg-red-500':'bg-emerald-600 hover:bg-emerald-500')}>{togglingWireguard?'Applying...':wireguard?.requested_enabled?'Disable':'Enable'}</button></div>
       </div>
       <div className="mt-3 grid gap-2 text-xs text-zinc-400 md:grid-cols-3">
         <div>Interface: <span className="text-zinc-200">{wireguard?.interface||'wg0'}</span></div>
