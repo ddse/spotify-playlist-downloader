@@ -606,7 +606,7 @@ async def search_nhaccuatui(q:str='',page:int=1,limit:int=10,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
     try:
         return _search_result_for_ui(
-            await youtube_search(q,page=page,limit=limit,source='nhaccuatui',wireguard=wireguard_enabled(),debug=bool(debug))
+            await youtube_search(q,page=page,limit=limit,source='nhaccuatui',wireguard=await wireguard_enabled(),debug=bool(debug))
         )
     except Exception as e:
         return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
