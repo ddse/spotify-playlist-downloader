@@ -169,6 +169,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve():
+    # Restore the persisted WireGuard preference whenever the worker/server starts.
+    # The restore runs asynchronously and retries while the network/container becomes ready.
+    manager.restore_persisted_state()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"[worker-api] listening on {HOST}:{PORT}", flush=True)
     server.serve_forever()
