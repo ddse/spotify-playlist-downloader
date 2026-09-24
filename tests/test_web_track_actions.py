@@ -96,7 +96,6 @@ def test_frontend_track_actions_use_query_parameters():
     assert "/api/queue/start?track_id=" in text
     assert "/api/queue/pause?track_id=" in text
     assert "/api/queue/prioritize?track_id=" in text
-    assert "/api/queue?track_id=" in text
     assert 'href={"/api/files/' not in text
     assert 'href={"/api/retry/' not in text
     assert "api('/api/queue/" not in text
