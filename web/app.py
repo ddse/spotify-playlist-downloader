@@ -799,7 +799,7 @@ def history():
     c=db(); rows=c.execute("SELECT * FROM tracks WHERE status IN ('completed','failed') ORDER BY updated_at DESC LIMIT 200").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
 
 @app.get('/api/files')
-def download_file(track_id:str=Query(...), download:bool=Query(False))
+def download_file(track_id:str=Query(...), download:bool=Query(False)):
     c=db()
     row=c.execute("SELECT * FROM tracks WHERE spotify_id=? AND status='completed'", (track_id,)).fetchone()
     c.close()
