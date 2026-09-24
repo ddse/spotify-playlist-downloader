@@ -81,7 +81,6 @@ class WireGuardManagerTests(unittest.TestCase):
                 path = self.wireguard._materialize_config()
             self.assertEqual(Path(path).read_text(), "[Interface]\nPrivateKey = secret\nAddress = 10.0.0.2/24\n")
             chmod.assert_called_once_with(path, 0o600)
-            result = self.wireguard.status.__wrapped__ if hasattr(self.wireguard.status, "__wrapped__") else None
             self.assertEqual(self.wireguard.config_content().splitlines()[1], "PrivateKey = secret")
         finally:
             self.wireguard._db_config = original
