@@ -97,8 +97,11 @@ def test_frontend_track_actions_use_query_parameters():
     assert "/api/queue/pause?track_id=" in text
     assert "/api/queue/prioritize?track_id=" in text
     assert "/api/queue?track_id=" in text
-    for prefix in ("/api/files", "/api/retry", "/api/queue/start", "/api/queue/pause", "/api/queue/prioritize", "/api/queue"):
-        assert prefix + '/"+' not in text
+    assert 'href={"/api/files/'+ not in text
+    assert 'href={"/api/retry/'+ not in text
+    assert "api('/api/queue/" not in text
+    assert "fetch('/api/queue?track_id=bulk'" not in text
+    assert "fetch('/api/queue/bulk'" in text
 
 
 def test_link_actions_are_not_buttons_nested_inside_anchors():
@@ -109,3 +112,12 @@ def test_link_actions_are_not_buttons_nested_inside_anchors():
     assert '<a href={item.url}' not in text
     assert '<a href={p.url}' not in text
     assert 'function Btn({children,onClick,href' in text
+
+
+def test_frontend_bulk_actions_use_bulk_endpoint():
+    source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
+    text = source.read_text(encoding="utf-8")
+    assert "fd.append('action',action)" in text
+    assert "fd.append('ids',selected.join(','))" in text
+    assert "fetch('/api/queue/bulk',{method:'POST',body:fd})" in text
+    assert "fetch('/api/queue?track_id=bulk'" not in text
