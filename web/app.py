@@ -319,7 +319,7 @@ def _is_allowed_outlink_host(host: str) -> bool:
     host = (host or '').lower().rstrip('.')
     return host in OUTLINK_ALLOWED_HOSTS or any(
         host.endswith('.' + suffix)
-        for suffix in ('zingmp3.vn', 'nhaccuatui.com', 'nct.vn', 'spotify.com', 'youtube.com', 'ytimg.com', 'zmdcdn.me')
+        for suffix in ('zingmp3.vn', 'nhaccuatui.com', 'nct.vn', 'spotify.com', 'youtube.com', 'ytimg.com', 'zmdcdn.me', 'scdn.co')
     )
 
 
