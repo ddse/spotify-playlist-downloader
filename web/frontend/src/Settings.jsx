@@ -31,8 +31,9 @@ export default function Settings({onClose}) {
     api('/api/settings/connections').then(d=>setItems(d.items||{})).catch(e=>setMessage(e.message));
     const refreshWireguard=()=>api('/api/settings/wireguard').then(setWireguard).catch(e=>setWireguard(x=>({...x,status:'unavailable',detail:e.message})));
     refreshWireguard();
-    const timer=setInterval(refreshWireguard,3000);
-    return()=>clearInterval(timer);
+    let ws; let stopped=false;
+    const connect=()=>{if(stopped)return;const proto=location.protocol==='https:'?'wss':'ws';ws=new WebSocket(proto+'://'+location.host+'/ws/wireguard');ws.onmessage=e=>{try{const d=JSON.parse(e.data);if(d.type==='wireguard')setWireguard(d)}catch{}};ws.onclose=()=>{if(!stopped)setTimeout(connect,1500)};ws.onerror=()=>{try{ws.close()}catch{}};connect();
+    return()=>{stopped=true;try{ws?.close()}catch{}};
   },[]);
   const p=PROVIDERS.find(x=>x.id===selected);
   const item=items[selected]||{provider:selected,enabled:true,configured:false,config:{}};
@@ -40,7 +41,7 @@ export default function Settings({onClose}) {
   const set=(k,v)=>setItems(x=>({...x,[selected]:{...item,config:{...(x[selected]?.config||{}),[k]:v}}}));
   const save=async()=>{setSaving(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:item.enabled,config})});setItems(x=>({...x,[selected]:d}));setMessage('Saved. No restart required.')}catch(e){setMessage(e.message)}finally{setSaving(false)}};
   const saveWireguard=async()=>{setSavingWireguard(true);setMessage('');try{const d=await api('/api/settings/wireguard',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({config:wireguardConfig})});setWireguard(x=>({...x,...d,config_exists:d.configured}));setWireguardConfig('');setMessage('WireGuard configuration saved. It will not be shown again.')}catch(e){setMessage(e.message)}finally{setSavingWireguard(false)}};
-  const toggleWireguard=async(enabled)=>{setTogglingWireguard(true);setMessage('');setWireguard(x=>({...x,requested_enabled:enabled}));try{const fd=new FormData();fd.append('enabled',enabled?'1':'0');const d=await api('/api/settings/wireguard',{method:'POST',body:fd});setWireguard(x=>({...x,...d,requested_enabled:enabled}));localStorage.setItem('music-wireguard',enabled?'1':'0');window.dispatchEvent(new Event('wireguard-setting'));setMessage(enabled?'WireGuard connecting...':'WireGuard disconnecting...')}catch(e){setWireguard(x=>({...x,requested_enabled:!enabled}));setMessage(e.message)}finally{setTogglingWireguard(false)}};
+  const toggleWireguard=async(enabled)=>{setTogglingWireguard(true);setMessage('');setWireguard(x=>({...x,requested_enabled:enabled}));try{const fd=new FormData();fd.append('enabled',enabled?'1':'0');const d=await api('/api/settings/wireguard',{method:'POST',body:fd});setWireguard(x=>({...x,...d,requested_enabled:enabled}));window.dispatchEvent(new Event('wireguard-setting'));setMessage(enabled?'WireGuard connecting...':'WireGuard disconnecting...')}catch(e){setWireguard(x=>({...x,requested_enabled:!enabled}));setMessage(e.message)}finally{setTogglingWireguard(false)}};
   const test=async()=>{setTesting(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected+'/test',{method:'POST'});setMessage(d.ok?'Connection test successful':(d.error||'Connection test failed'));setItems(x=>({...x,[selected]:{...x[selected],status:d.status,error:d.error||''}}));}catch(e){setMessage(e.message)}finally{setTesting(false)}};
   return <div className="glass mt-4 rounded-2xl p-5">
     <div className="flex items-center justify-between border-b border-white/10 pb-4"><div><h2 className="text-lg font-semibold">Provider Connections</h2><p className="text-xs text-zinc-500">Settings are stored in the application database and applied at runtime.</p></div><button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-2 text-sm">Close</button></div>
