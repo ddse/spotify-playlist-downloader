@@ -109,6 +109,12 @@ class WireGuardManagerTests(unittest.TestCase):
         ):
             self.assertFalse(self.wireguard.is_up())
 
+    def test_setting_enabled_is_runtime_only(self):
+        self.wireguard._state = True
+        self.assertTrue(self.wireguard.setting_enabled())
+        self.wireguard._state = False
+        self.assertFalse(self.wireguard.setting_enabled())
+
     def test_run_does_not_toggle_global_interface(self):
         with patch.object(self.wireguard, "set_enabled") as set_enabled:
             result = self.wireguard.run(True, lambda: "ok")
