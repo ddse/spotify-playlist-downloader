@@ -108,10 +108,17 @@ def test_completed_download_uses_fetch_blob_action():
     source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
     text = source.read_text(encoding="utf-8")
     assert "const downloadFile=async(trackId)=>" in text
-    assert "fetch('/api/files?track_id='+encodeURIComponent(trackId)+'&download=1')" in text
+    assert "fetch(endpoint,{cache:'no-store'})" in text
     assert "await response.blob()" in text
     assert "anchor.download=filename" in text
-    assert '<Btn href={"/api/files?track_id="+encodeURIComponent(x.spotify_id)+"&download=1"}>' not in text
+    assert "catch(error)" in text
+
+
+def test_index_disables_html_cache():
+    source = Path(__file__).resolve().parents[1] / "web" / "app.py"
+    text = source.read_text(encoding="utf-8")
+    assert "Cache-Control" in text
+    assert "no-store, no-cache, must-revalidate, max-age=0" in text
 
 
 def test_link_actions_are_not_buttons_nested_inside_anchors():
