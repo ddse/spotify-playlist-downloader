@@ -28,6 +28,8 @@ jobs:
   validate:
     name: Full validation
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/web
 
     steps:
       - name: Checkout
@@ -48,8 +50,6 @@ jobs:
         run: python -m compileall -q database.py web worker tests
 
       - name: Python automation tests
-        env:
-          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/web
         run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Download output resolution tests
         run: python -m pytest -q tests/test_download_output.py
