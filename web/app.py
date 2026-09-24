@@ -28,7 +28,12 @@ def wireguard_enabled():
         value=row['value'] == '1'
     c.close(); return value
 app=FastAPI(title='Music Downloader v3'); templates=Jinja2Templates(directory='templates')
-app.mount('/assets', StaticFiles(directory='static/assets'), name='assets')
+# Keep module imports usable for unit tests and tooling that do not build the
+# frontend assets. The production image still mounts the directory when it is
+# present.
+_assets_dir = Path('static/assets')
+if _assets_dir.is_dir():
+    app.mount('/assets', StaticFiles(directory=str(_assets_dir)), name='assets')
 
 
 def detect_source_type(url):
