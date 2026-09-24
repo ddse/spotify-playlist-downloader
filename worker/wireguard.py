@@ -102,16 +102,9 @@ def set_enabled(enabled: bool):
 
 
 def setting_enabled():
-    try:
-        from database import db
-        c = db()
-        row = c.execute(
-            "SELECT value FROM app_settings WHERE key='wireguard_enabled'"
-        ).fetchone()
-        c.close()
-        return bool(row and row["value"] == "1")
-    except Exception:
-        return False
+    """Return the live runtime toggle; enabled state is intentionally not persisted."""
+    with _lock:
+        return bool(_state)
 
 
 def run(enabled, func):
