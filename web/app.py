@@ -108,31 +108,25 @@ def provider_row(c, provider):
     if cfg.get('cookies'): safe['cookies']='********'
     return {'provider':provider,'enabled':bool(row['enabled']),'config':safe,'configured':configured,'status':row['status'] or 'not_configured','error':row['error'] or '','last_tested_at':row['last_tested_at']}
 
-@app.get('/api/settings/wireguard/files')
-async def wireguard_files():
-    """Find WireGuard config files inside the worker's mounted config directory."""
-    result = {'files': [], 'directory': '/etc/wireguard'}
-    try:
-        async with httpx.AsyncClient(timeout=3) as client:
-            response = await client.get(
-                f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard/files"
-            )
-            response.raise_for_status()
-            return response.json()
-    except Exception as e:
-        result['error'] = str(e)
-        return result
+def wireguard_configured():
+    c = db()
+    row = c.execute("SELECT value FROM app_settings WHERE key='wireguard_config'").fetchone()
+    c.close()
+    return bool(row and (row["value"] or "").strip())
 
 
 @app.get('/api/settings/wireguard')
 async def wireguard_settings():
-    """Return persisted preference plus live worker WireGuard status."""
+    """Return WireGuard state without ever returning the saved configuration."""
+    configured = wireguard_configured()
     result = {
         'enabled': wireguard_enabled(),
+        'requested_enabled': wireguard_enabled(),
         'interface': os.getenv('WG_INTERFACE', 'wg0'),
-        'config_path': os.getenv('WG_CONFIG', '/etc/wireguard/wg0.conf'),
-        'config_exists': False,
-        'status': 'connecting' if wireguard_enabled() else 'unavailable',
+        'config_path': 'database://wireguard_config',
+        'config_exists': configured,
+        'configured': configured,
+        'status': 'connecting' if wireguard_enabled() else ('disconnected' if configured else 'unavailable'),
     }
     try:
         async with httpx.AsyncClient(timeout=8) as client:
@@ -145,9 +139,10 @@ async def wireguard_settings():
                 'enabled': bool(wg.get('enabled')),
                 'requested_enabled': wireguard_enabled(),
                 'interface': wg.get('interface', 'wg0'),
-                'config_path': wg.get('config_path', os.getenv('WG_CONFIG', '/etc/wireguard/wg0.conf')),
-                'config_exists': bool(wg.get('config_exists')),
-                'status': wg.get('status') or ('connected' if wg.get('vpn_route') else ('routing' if wg.get('enabled') else 'disconnected')),
+                'config_path': 'database://wireguard_config',
+                'config_exists': configured,
+                'configured': configured,
+                'status': wg.get('status') or ('connected' if wg.get('vpn_route') else ('connecting' if wireguard_enabled() else 'disconnected')),
                 'status_detail': wg.get('status_detail', ''),
                 'vpn_route': bool(wg.get('vpn_route')),
                 'route_active': bool(wg.get('route_active')),
@@ -157,17 +152,42 @@ async def wireguard_settings():
                 'send_bytes': int(wg.get('send_bytes', 0)),
                 'peer_count': int(wg.get('peer_count', 0)),
             })
-            # `enabled` is the live interface state; persisted preference is separate.
-            result['requested_enabled'] = wireguard_enabled()
-            if result['requested_enabled'] and result['status'] in {'routing', 'unavailable'}:
-                result['status'] = 'connecting'
     except Exception as e:
         result['requested_enabled'] = wireguard_enabled()
-        if result['requested_enabled']:
-            result['status'] = 'connecting'
-            result['status_detail'] = 'WireGuard transition is still in progress; worker status is temporarily unavailable.'
+        result['status'] = 'connecting' if result['requested_enabled'] else ('disconnected' if configured else 'unavailable')
         result['detail'] = str(e)
     return result
+
+
+@app.put('/api/settings/wireguard')
+async def wireguard_save(request: Request):
+    """Save a WireGuard client config to DB; the response never contains its contents."""
+    body = await request.json()
+    config = str(body.get('config') or '').strip()
+    enabled = body.get('enabled')
+    c = db()
+    if config:
+        c.execute(
+            "INSERT INTO app_settings(key,value) VALUES('wireguard_config',?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (config,),
+        )
+    if enabled is not None:
+        value = '1' if bool(enabled) else '0'
+        c.execute(
+            "INSERT INTO app_settings(key,value) VALUES('wireguard_enabled',?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (value,),
+        )
+    c.commit()
+    c.close()
+    return {
+        'ok': True,
+        'configured': wireguard_configured(),
+        'requested_enabled': wireguard_enabled(),
+        'config_path': 'database://wireguard_config',
+        'message': 'WireGuard configuration saved. The configuration is write-only from the UI.',
+    }
 
 
 @app.post('/api/settings/wireguard')
@@ -175,6 +195,10 @@ async def wireguard_toggle(enabled: bool = Form(...)):
     """Persist and apply the WireGuard preference through the worker."""
     c = db()
     value = '1' if enabled else '0'
+    configured = wireguard_configured()
+    if enabled and not configured:
+        c.close()
+        raise HTTPException(400, 'Save a WireGuard configuration before enabling it')
     c.execute(
         "INSERT INTO app_settings(key,value) VALUES('wireguard_enabled',?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -191,14 +215,18 @@ async def wireguard_toggle(enabled: bool = Form(...)):
             response.raise_for_status()
             result = response.json()
             result['requested_enabled'] = enabled
-            if enabled and not result.get('enabled') and result.get('status') != 'connected':
-                result['status'] = 'connecting'
-            # `enabled` remains the live interface state returned by worker.
+            result['config_exists'] = configured
+            result['configured'] = configured
+            result.pop('config_path', None)
+            result['config_path'] = 'database://wireguard_config'
             return result
     except Exception as e:
         return {
             'enabled': False,
             'requested_enabled': enabled,
+            'configured': configured,
+            'config_exists': configured,
+            'config_path': 'database://wireguard_config',
             'status': 'connecting' if enabled else 'unavailable',
             'status_detail': 'WireGuard transition is still in progress; worker status is temporarily unavailable.' if enabled else '',
             'error': str(e),
@@ -715,7 +743,8 @@ def retry(track_id:str=Query(...)):
         "WHERE spotify_id=? AND status IN ('failed','completed')",
         (track_id,),
     )
-    c.commit(); c.close()
+    c.commit()
+    c.close()
     return {'ok':cur.rowcount>0}
 
 @app.delete('/api/queue')
@@ -770,7 +799,7 @@ def history():
     c=db(); rows=c.execute("SELECT * FROM tracks WHERE status IN ('completed','failed') ORDER BY updated_at DESC LIMIT 200").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
 
 @app.get('/api/files')
-def download_file(track_id:str=Query(...), download:bool=Query(False)):
+def download_file(track_id:str=Query(...), download:bool=Query(False))
     c=db()
     row=c.execute("SELECT * FROM tracks WHERE spotify_id=? AND status='completed'", (track_id,)).fetchone()
     c.close()
