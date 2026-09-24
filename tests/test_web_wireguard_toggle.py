@@ -25,3 +25,25 @@ def test_settings_does_not_render_debug_logging_panel():
     text = SETTINGS.read_text(encoding="utf-8")
     assert "Debug logging" not in text
     assert "api('/api/debug')" not in text
+
+
+def test_search_state_is_persisted_for_reload():
+    app = (Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx").read_text(encoding="utf-8")
+    assert "music-search-state" in app
+    assert "JSON.parse(localStorage.getItem('music-search-state')" in app
+    assert "JSON.stringify({q,source,debugMode,results,searchErrors,searchDebug,page})" in app
+
+
+def test_wireguard_ui_uses_websocket_instead_of_settings_polling():
+    settings = SETTINGS.read_text(encoding="utf-8")
+    app = (Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx").read_text(encoding="utf-8")
+    assert "new WebSocket(proto+'://'+location.host+'/ws/wireguard')" in settings
+    assert "new WebSocket(proto+'://'+location.host+'/ws/wireguard')" in app
+    assert "setInterval(refreshWireguard,3000)" not in settings
+
+
+def test_wireguard_enable_state_is_not_persisted_to_local_storage():
+    settings = SETTINGS.read_text(encoding="utf-8")
+    app = (Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx").read_text(encoding="utf-8")
+    assert "localStorage.setItem('music-wireguard'" not in settings
+    assert "localStorage.setItem('music-wireguard'" not in app
