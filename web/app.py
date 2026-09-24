@@ -665,16 +665,16 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
     c.commit(); c.close()
     return {'ok': True, 'id': key, 'status': 'queued'}
 
-@app.post('/api/queue/{track_id:path}/start')
-def start_queue(track_id:str):
+@app.post('/api/queue/start')
+def start_queue(track_id:str=Query(...)):
     c=db(); c.execute("UPDATE tracks SET auto_start=1,status=CASE WHEN status IN ('paused','queued') THEN 'queued' ELSE status END,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status IN ('paused','queued')",(track_id,)); c.commit(); c.close(); return {'ok':True}
 
-@app.post('/api/queue/{track_id:path}/pause')
-def pause_queue(track_id:str):
+@app.post('/api/queue/pause')
+def pause_queue(track_id:str=Query(...)):
     c=db(); cur=c.execute("UPDATE tracks SET auto_start=0,status='paused',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status='queued'",(track_id,)); c.commit(); c.close(); return {'ok':cur.rowcount>0}
 
-@app.post('/api/queue/prioritize/{track_id:path}')
-def prioritize_queue(track_id:str):
+@app.post('/api/queue/prioritize')
+def prioritize_queue(track_id:str=Query(...)):
     c=db(); c.execute("UPDATE tracks SET priority=priority+1,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status IN ('queued','paused')",(track_id,)); c.commit(); c.close(); return {'ok':True}
 
 @app.post('/api/import/youtube')
@@ -714,8 +714,8 @@ def queue_bulk(action:str=Form(...),ids:str=Form('')):
     c.commit(); c.close()
     return {'ok':True}
 
-@app.delete('/api/files/{track_id:path}')
-def remove_file(track_id:str):
+@app.delete('/api/files')
+def remove_file(track_id:str=Query(...)):
     c=db()
     row=c.execute("SELECT * FROM tracks WHERE spotify_id=?", (track_id,)).fetchone()
     if not row:
@@ -735,8 +735,8 @@ def remove_file(track_id:str):
     c.close()
     return {'ok':True}
 
-@app.post('/api/retry/{track_id:path}')
-def retry(track_id:str):
+@app.post('/api/retry')
+def retry(track_id:str=Query(...)):
     c=db()
     cur=c.execute(
         "UPDATE tracks SET status='queued',progress=0,error=NULL,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP "
@@ -747,8 +747,8 @@ def retry(track_id:str):
     c.close()
     return {'ok':cur.rowcount>0}
 
-@app.delete('/api/queue/{track_id:path}')
-def delete_queue(track_id:str):
+@app.delete('/api/queue')
+def delete_queue(track_id:str=Query(...)):
     c=db(); cur=c.execute("DELETE FROM tracks WHERE spotify_id=? AND status IN ('queued','failed','pending_source')",(track_id,)); c.commit(); c.close(); return {'ok':cur.rowcount>0}
 
 @app.post('/api/playlists')
