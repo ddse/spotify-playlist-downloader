@@ -74,6 +74,7 @@ def test_wireguard_websocket_accepts_connection_and_pushes_state(tmp_path, monke
     assert payload["enabled"] is True
     assert payload["requested_enabled"] is True
     assert payload["interface"] == "wg0"
+    assert payload["status"] == "connected"
 
 
 def test_wireguard_websocket_route_is_registered():
