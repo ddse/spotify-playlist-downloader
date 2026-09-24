@@ -14,6 +14,10 @@ class ImageProxyTests(unittest.TestCase):
     def test_image_proxy_url_rejects_unknown_host(self):
         self.assertEqual(_image_proxy_url("https://example.com/image.jpg"), "")
 
+    def test_allowed_host_supports_zing_and_youtube_image_cdns(self):
+        self.assertTrue(_is_allowed_outlink_host("photo-resize-zmp3.zmdcdn.me"))
+        self.assertTrue(_is_allowed_outlink_host("i.ytimg.com"))
+
     def test_allowed_host_supports_nct_subdomains(self):
         self.assertTrue(_is_allowed_outlink_host("image-cdn.nct.vn"))
         self.assertTrue(_is_allowed_outlink_host("nct.vn"))
