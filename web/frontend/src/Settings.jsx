@@ -1,4 +1,5 @@
 import React, {useEffect, useState} from 'react';
+import {Settings2, X, KeyRound, Network, CheckCircle2} from 'lucide-react';
 
 async function api(path, opts={}) {
   const r=await fetch(path, opts);
