@@ -184,7 +184,7 @@ async def wireguard_settings():
             wg = response.json()
             result.update({
                 'enabled': bool(wg.get('enabled')),
-                'requested_enabled': bool(wg.get('enabled')),
+                'requested_enabled': bool(wg.get('requested_enabled', wg.get('enabled'))),
                 'interface': wg.get('interface', 'wg0'),
                 'config_path': 'database://wireguard_config',
                 'config_exists': configured,
