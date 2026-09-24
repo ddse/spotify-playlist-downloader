@@ -22,4 +22,4 @@ class TrackActionRouteTests(unittest.TestCase):
                 "/api/files", "/api/retry", "/api/queue/start",
                 "/api/queue/pause", "/api/queue/prioritize", "/api/queue"
             }:
-                self.assertIn("track_id", route.dependant.query_params)
+                self.assertIn("track_id", {param.name for param in route.dependant.query_params})
