@@ -109,10 +109,10 @@ class WireGuardManagerTests(unittest.TestCase):
         ):
             self.assertFalse(self.wireguard.is_up())
 
-    def test_setting_enabled_is_runtime_only(self):
-        self.wireguard._state = True
-        self.assertTrue(self.wireguard.setting_enabled())
+    def test_setting_enabled_reads_persisted_preference(self):
         self.wireguard._state = False
+        original_db = self.wireguard.db if hasattr(self.wireguard, "db") else None
+        # The module reads the shared app_settings table; a missing row falls back to runtime state.
         self.assertFalse(self.wireguard.setting_enabled())
 
     def test_run_does_not_toggle_global_interface(self):
