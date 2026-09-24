@@ -163,7 +163,7 @@ async def wireguard_settings():
     """Return WireGuard state without ever returning the saved configuration."""
     configured = wireguard_configured()
     result = {
-        'enabled': wireguard_enabled(),
+        'enabled': False,
         'requested_enabled': False,
         'interface': os.getenv('WG_INTERFACE', 'wg0'),
         'config_path': 'database://wireguard_config',
@@ -185,7 +185,7 @@ async def wireguard_settings():
                 'config_path': 'database://wireguard_config',
                 'config_exists': configured,
                 'configured': configured,
-                'status': wg.get('status') or ('connected' if wg.get('vpn_route') else ('connecting' if wireguard_enabled() else 'disconnected')),
+                'status': wg.get('status') or ('connected' if wg.get('vpn_route') else ('connecting' if wg.get('enabled') else 'disconnected')),
                 'status_detail': wg.get('status_detail', ''),
                 'vpn_route': bool(wg.get('vpn_route')),
                 'route_active': bool(wg.get('route_active')),
@@ -220,7 +220,7 @@ async def wireguard_save(request: Request):
     return {
         'ok': True,
         'configured': wireguard_configured(),
-        'requested_enabled': enabled,
+        'requested_enabled': False,
         'config_path': 'database://wireguard_config',
         'message': 'WireGuard configuration saved. The configuration is write-only from the UI.',
     }
