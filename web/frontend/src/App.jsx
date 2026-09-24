@@ -40,7 +40,7 @@ function App(){const [tab,setTab]=useState('downloading'),[showSettings,setShowS
  const findYouTube=(item)=>{setSource('youtube');setQ(item.artists+' - '+item.title);setTimeout(()=>search(1),0)};
  const selectAll=(ids)=>setSel(new Set(ids));
  const clearSelection=()=>setSel(new Set());
- const bulk=async(action)=>{if(!selected.length)return;const fd=new FormData();fd.append('action',action);fd.append('ids',selected.join(','));await fetch('/api/queue?track_id=bulk',{method:'POST',body:fd});setSel(new Set());load()};
+ const bulk=async(action)=>{if(!selected.length)return;const fd=new FormData();fd.append('action',action);fd.append('ids',selected.join(','));await fetch('/api/queue/bulk',{method:'POST',body:fd});setSel(new Set());load()};
  const queue=data.jobs.filter(x=>['downloading','queued','paused','pending_source','failed'].includes(x.status));
  const stats=useMemo(()=>({queue:queue.length,done:data.history.filter(x=>x.status==='completed').length,subs:data.playlists.length}),[queue,data]);
  return <><div className="mx-auto max-w-[1500px] px-4 pb-12 md:px-8">
