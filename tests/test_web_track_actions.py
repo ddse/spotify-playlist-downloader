@@ -99,7 +99,7 @@ def test_frontend_track_actions_use_query_parameters():
     assert 'href={"/api/files/' not in text
     assert 'href={"/api/retry/' not in text
     for prefix in ("/api/queue/start", "/api/queue/pause", "/api/queue/prioritize"):
-        assert prefix + "/\"+"+" not in text
+        assert f"{prefix}/'+" not in text
     assert "fetch('/api/queue?track_id=bulk'" not in text
     assert "fetch('/api/queue/bulk'" in text
 
