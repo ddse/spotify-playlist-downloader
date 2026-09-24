@@ -72,6 +72,9 @@ class WireGuardManagerTests(unittest.TestCase):
         self.tmp.cleanup()
 
 
+    def test_runtime_config_name_matches_interface_for_wg_quick(self):
+        self.assertEqual(Path(self.wireguard.RUNTIME_CONFIG).name, f"{self.wireguard.INTERFACE}.conf")
+
     def test_database_config_is_used_and_materialized_without_exposing_contents(self):
         original = self.wireguard._db_config
         self.wireguard._db_config = lambda: "[Interface]\nPrivateKey = secret\nAddress = 10.0.0.2/24"
