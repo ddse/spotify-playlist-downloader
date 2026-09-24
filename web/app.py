@@ -324,7 +324,7 @@ async def services():
                 'interface':wg.get('interface','wg0'),
                 'config_path':wg.get('config_path',os.getenv('WG_CONFIG','/etc/wireguard/wg0.conf')),
                 'config_exists':bool(wg.get('config_exists')),
-                'status':wg.get('status') or ('connected' if wg.get('vpn_route') else ('connecting' if wireguard_enabled() else 'disconnected')),
+                'status':wg.get('status') or ('connected' if wg.get('vpn_route') else ('connecting' if await wireguard_enabled() else 'disconnected')),
                 'vpn_route':bool(wg.get('vpn_route')),
                 'route_active':bool(wg.get('route_active')),
                 'handshake_recent':bool(wg.get('handshake_recent')),
@@ -596,7 +596,7 @@ async def search_zingmp3(q:str='',page:int=1,limit:int=10,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
     try:
         return _search_result_for_ui(
-            await youtube_search(q,page=page,limit=limit,source='zingmp3',wireguard=wireguard_enabled(),debug=bool(debug))
+            await youtube_search(q,page=page,limit=limit,source='zingmp3',wireguard=await wireguard_enabled(),debug=bool(debug))
         )
     except Exception as e:
         return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
@@ -612,7 +612,7 @@ async def search_nhaccuatui(q:str='',page:int=1,limit:int=10,debug:int=0):
         return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.post('/api/download')
-def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),source_mode:str=Form('single'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1'),wireguard:str=Form('0')):
+async def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),source_mode:str=Form('single'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1'),wireguard:str=Form('0')):
     source_url = _restore_proxied_outlink(source_url)
     download_type = download_type if download_type in ('audio', 'video', 'captions', 'thumbnail') else 'audio'
     source_mode = source_mode if source_mode in {'single','playlist','channel'} else 'single'
@@ -645,7 +645,7 @@ def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),a
     subs = 1 if str(subtitle).lower() in {'1','true','on','yes'} else 0
     chapters = 1 if str(split_chapters).lower() in {'1','true','on','yes'} else 0
     start = 1 if str(auto_start).lower() in {'1','true','on','yes'} else 0
-    use_wireguard = 1 if str(wireguard).lower() in {'1','true','on','yes'} else int(wireguard_enabled())
+    use_wireguard = 1 if str(wireguard).lower() in {'1','true','on','yes'} else int(await wireguard_enabled())
     key=('yt:'+youtube_id if youtube_id else 'url:'+secrets.token_hex(12))+':'+download_type+':'+download_format+':'+download_quality+':'+video_codec+':'+folder+':'+str(item_limit)
     c=db()
     # Use named parameters here so adding/removing a column cannot silently
