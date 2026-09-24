@@ -7,8 +7,11 @@ import urllib.request
 
 CONFIG = os.getenv("WG_CONFIG", "/etc/wireguard/wg0.conf")
 DB_CONFIG_KEY = "wireguard_config"
-RUNTIME_CONFIG = "/tmp/music-downloader-wg0.conf"
 INTERFACE = os.getenv("WG_INTERFACE", "wg0")
+# wg-quick derives the interface name from the config filename. Keep the
+# runtime config basename aligned with WG_INTERFACE so `wg-quick up` creates
+# and manages the same interface used by status/down operations.
+RUNTIME_CONFIG = f"/tmp/{INTERFACE}.conf"
 _lock = threading.RLock()
 _state = False
 _operation = None
