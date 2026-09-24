@@ -14,6 +14,16 @@ class ImageProxyTests(unittest.TestCase):
     def test_image_proxy_url_rejects_unknown_host(self):
         self.assertEqual(_image_proxy_url("https://example.com/image.jpg"), "")
 
+    def test_allowed_host_supports_spotify_image_cdn(self):
+        self.assertTrue(_is_allowed_outlink_host("i.scdn.co"))
+
+    def test_spotify_thumbnail_is_non_null_proxy(self):
+        result = _rewrite_outlinks({
+            "image": "https://i.scdn.co/image/ab67616d00001e02abcdef1234567890"
+        })
+        self.assertTrue(result["image"].startswith("/api/image-proxy?url="))
+        self.assertNotEqual(result["image"], "")
+
     def test_allowed_host_supports_zing_and_youtube_image_cdns(self):
         self.assertTrue(_is_allowed_outlink_host("photo-resize-zmp3.zmdcdn.me"))
         self.assertTrue(_is_allowed_outlink_host("i.ytimg.com"))
