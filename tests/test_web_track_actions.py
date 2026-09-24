@@ -99,3 +99,13 @@ def test_frontend_track_actions_use_query_parameters():
     assert "/api/queue?track_id=" in text
     for prefix in ("/api/files", "/api/retry", "/api/queue/start", "/api/queue/pause", "/api/queue/prioritize", "/api/queue"):
         assert prefix + '/"+' not in text
+
+
+def test_link_actions_are_not_buttons_nested_inside_anchors():
+    source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
+    text = source.read_text(encoding="utf-8")
+    assert '<a href={"/api/files?' not in text
+    assert '<a href={x.source_url}' not in text
+    assert '<a href={item.url}' not in text
+    assert '<a href={p.url}' not in text
+    assert 'function Btn({children,onClick,href' in text
