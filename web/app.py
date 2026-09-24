@@ -69,7 +69,11 @@ def startup(): db().close()
 
 @app.get('/',response_class=HTMLResponse)
 def index():
-    return FileResponse('static/index.html')
+    response = FileResponse('static/index.html')
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 @app.get('/health')
 async def health(): return {'ok':True}
