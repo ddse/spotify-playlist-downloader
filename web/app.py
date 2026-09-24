@@ -295,6 +295,21 @@ def _is_allowed_outlink_host(host: str) -> bool:
     )
 
 
+def _restore_proxied_outlink(value: str) -> str:
+    """Restore an internal outlink proxy URL before handing it to the worker."""
+    value = str(value or '').strip()
+    if not value:
+        return ''
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError:
+        return value
+    if parsed.path != '/api/outlink':
+        return value
+    target = urllib.parse.parse_qs(parsed.query).get('url', [''])[0].strip()
+    return target or value
+
+
 def _outlink_url(value: str) -> str:
     value = str(value or '').strip()
     if not value:
@@ -518,6 +533,7 @@ async def search_nhaccuatui(q:str='',page:int=1,limit:int=10,debug:int=0):
 
 @app.post('/api/download')
 def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),source_mode:str=Form('single'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1'),wireguard:str=Form('0')):
+    source_url = _restore_proxied_outlink(source_url)
     download_type = download_type if download_type in ('audio', 'video', 'captions', 'thumbnail') else 'audio'
     source_mode = source_mode if source_mode in {'single','playlist','channel'} else 'single'
     audio_formats = {'m4a','mp3','opus','wav','flac'}
