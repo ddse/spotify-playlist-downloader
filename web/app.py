@@ -498,23 +498,40 @@ async def search_spotify(q:str=''):
         'available':True,
     })
 
+def _search_result_for_ui(result):
+    """Rewrite every provider outlink before returning search data to the UI."""
+    return _rewrite_outlinks(result if isinstance(result, dict) else {'items': []})
+
+
 @app.get('/api/search/youtube')
 async def search_youtube(q:str='',page:int=1,limit:int=10,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit,wireguard=wireguard_enabled(),debug=bool(debug))
-    except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
+    try:
+        return _search_result_for_ui(
+            await youtube_search(q,page=page,limit=limit,wireguard=wireguard_enabled(),debug=bool(debug))
+        )
+    except Exception as e:
+        return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.get('/api/search/zingmp3')
 async def search_zingmp3(q:str='',page:int=1,limit:int=10,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit,source='zingmp3',wireguard=wireguard_enabled(),debug=bool(debug))
-    except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
+    try:
+        return _search_result_for_ui(
+            await youtube_search(q,page=page,limit=limit,source='zingmp3',wireguard=wireguard_enabled(),debug=bool(debug))
+        )
+    except Exception as e:
+        return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.get('/api/search/nhaccuatui')
 async def search_nhaccuatui(q:str='',page:int=1,limit:int=10,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
-    try:return await youtube_search(q,page=page,limit=limit,source='nhaccuatui',wireguard=wireguard_enabled(),debug=bool(debug))
-    except Exception as e:return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
+    try:
+        return _search_result_for_ui(
+            await youtube_search(q,page=page,limit=limit,source='nhaccuatui',wireguard=wireguard_enabled(),debug=bool(debug))
+        )
+    except Exception as e:
+        return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.post('/api/download')
 def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),source_mode:str=Form('single'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1'),wireguard:str=Form('0')):
