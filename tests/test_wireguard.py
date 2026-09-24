@@ -116,8 +116,7 @@ class WireGuardManagerTests(unittest.TestCase):
         self.assertFalse(self.wireguard.setting_enabled())
 
     def test_set_enabled_persists_preference(self):
-        with patch.object(self.wireguard, "_persist_enabled") as persist:
-            with patch.object(self.wireguard, "is_up", return_value=True):
+        with patch.object(self.wireguard, "_persist_enabled") as persist,              patch.object(self.wireguard, "_run") as run,              patch.object(self.wireguard, "is_up", side_effect=[True, True]):
                 self.wireguard.set_enabled(True)
                 self.wireguard.set_enabled(False)
         persist.assert_any_call(True)
