@@ -115,17 +115,6 @@ def wireguard_configured():
     return bool(row and (row["value"] or "").strip())
 
 
-def wireguard_enabled():
-    c=db()
-    row=c.execute("SELECT value FROM app_settings WHERE key='wireguard_enabled'").fetchone()
-    if row is None:
-        value=1 if WIREGUARD_ENV_DEFAULT else 0
-        c.execute("INSERT OR IGNORE INTO app_settings(key,value) VALUES('wireguard_enabled',?)",(str(value),)); c.commit()
-    else:
-        value=row['value'] == '1'
-    c.close(); return value
-
-
 @app.get('/api/settings/wireguard')
 async def wireguard_settings():
     """Return WireGuard state without ever returning the saved configuration."""
