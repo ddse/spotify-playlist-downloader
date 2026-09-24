@@ -144,7 +144,7 @@ class WireGuardManagerTests(unittest.TestCase):
             self.wireguard.set_enabled(True)
             self.wireguard.set_enabled(True)
 
-        run.assert_called_once_with("wg-quick", "up", str(self.config))
+        run.assert_called_once_with("wg-quick", "up", self.wireguard.RUNTIME_CONFIG)
 
     def test_disable_runs_wg_quick_down_only_when_up(self):
         with patch.object(
@@ -152,12 +152,12 @@ class WireGuardManagerTests(unittest.TestCase):
         ), patch.object(self.wireguard, "_run") as run:
             self.wireguard.set_enabled(False)
 
-        run.assert_called_once_with("wg-quick", "down", str(self.config))
+        run.assert_called_once_with("wg-quick", "down", self.wireguard.INTERFACE)
 
     def test_enable_fails_when_config_is_missing(self):
         self.wireguard.CONFIG = str(Path(self.tmp.name) / "missing.conf")
 
-        with self.assertRaisesRegex(RuntimeError, "WireGuard config not found"):
+        with self.assertRaisesRegex(RuntimeError, "WireGuard configuration is not saved in the database"):
             self.wireguard.set_enabled(True)
 
     def test_route_status_detects_wg_quick_policy_route(self):
