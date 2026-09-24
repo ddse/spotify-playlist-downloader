@@ -112,8 +112,9 @@ The UI Settings dialog contains **Use WireGuard for YouTube**. Saving the settin
 
 ### WireGuard setup
 
-1. Copy `wireguard/wg0.conf.example` to `wireguard/wg0.conf`.
-2. Put the WireGuard **client** configuration in `wg0.conf`.
+1. Open **Settings → WireGuard** in the web UI.
+2. Paste the WireGuard **client** configuration into the configuration box and save it.
+3. The configuration is stored in the application database and is **write-only**: after saving, the UI/API never returns the private configuration contents.
 3. For a full-tunnel setup, keep `AllowedIPs = 0.0.0.0/0`.
 4. Make sure the WireGuard server (for example, an ASUS router) forwards/NATs the client subnet to the Internet.
 5. Start the stack:
