@@ -6,6 +6,8 @@ import urllib.request
 
 
 CONFIG = os.getenv("WG_CONFIG", "/etc/wireguard/wg0.conf")
+DB_CONFIG_KEY = "wireguard_config"
+RUNTIME_CONFIG = "/tmp/music-downloader-wg0.conf"
 INTERFACE = os.getenv("WG_INTERFACE", "wg0")
 _lock = threading.RLock()
 _state = False
@@ -36,18 +38,63 @@ def is_up():
         return False
 
 
+def _db_config():
+    """Return the WireGuard config stored in the shared application DB."""
+    try:
+        from database import db
+        c = db()
+        row = c.execute("SELECT value FROM app_settings WHERE key=?", (DB_CONFIG_KEY,)).fetchone()
+        c.close()
+        return (row["value"] or "").strip() if row else ""
+    except Exception:
+        return ""
+
+
+def _legacy_config():
+    """Read the legacy mounted config as a migration fallback."""
+    try:
+        if os.path.isfile(CONFIG):
+            with open(CONFIG, "r", encoding="utf-8") as handle:
+                return handle.read().strip()
+    except OSError:
+        pass
+    return ""
+
+
+def config_content():
+    return _db_config() or _legacy_config()
+
+
+def config_configured():
+    return bool(config_content())
+
+
+def _materialize_config():
+    content = config_content()
+    if not content:
+        raise RuntimeError("WireGuard configuration is not saved in the database")
+    with open(RUNTIME_CONFIG, "w", encoding="utf-8") as handle:
+        handle.write(content.rstrip() + "\n")
+    os.chmod(RUNTIME_CONFIG, 0o600)
+    return RUNTIME_CONFIG
+
+
 def set_enabled(enabled: bool):
     global _state
     with _lock:
         if enabled:
-            if not os.path.exists(CONFIG):
-                raise RuntimeError(f"WireGuard config not found: {CONFIG}")
+            if not config_configured():
+                raise RuntimeError("WireGuard configuration is not saved in the database")
             if not is_up():
-                _run("wg-quick", "up", CONFIG)
+                _run("wg-quick", "up", _materialize_config())
             _state = True
         else:
             if is_up():
-                _run("wg-quick", "down", CONFIG)
+                _run("wg-quick", "down", INTERFACE)
+            try:
+                os.remove(RUNTIME_CONFIG)
+            except OSError:
+                pass
             _state = False
 
 
@@ -125,7 +172,7 @@ def debug_status():
         return {
             "requested_enabled": bool(_state),
             "interface": INTERFACE,
-            "config_exists": os.path.isfile(CONFIG),
+            "config_exists": config_configured(),
             "interface_up": False,
             "route_active": False,
             "handshake_recent": False,
@@ -246,7 +293,7 @@ def status():
         return {
             "enabled": up,
             "interface": INTERFACE,
-            "config_path": CONFIG,
+            "config_path": "database://wireguard_config",
             "config_source": "file" if os.path.isfile(CONFIG) else ("live_interface" if up else "missing"),
             "config_exists": os.path.isfile(CONFIG) or up,
             "route_active": route_active,
