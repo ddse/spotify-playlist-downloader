@@ -75,7 +75,7 @@ async def startup():
                 async with httpx.AsyncClient(timeout=3) as client:
                     response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
                     response.raise_for_status(); wg=response.json()
-                payload={'type':'wireguard',**wg,'requested_enabled':bool(wg.get('enabled'))}
+                payload={'type':'wireguard',**wg,'requested_enabled':bool(wg.get('requested_enabled', wg.get('enabled')))}
                 fingerprint=json.dumps(payload,sort_keys=True)
                 if fingerprint != app.state.wireguard_last:
                     app.state.wireguard_last=fingerprint
@@ -101,7 +101,7 @@ async def wireguard_socket(websocket: WebSocket):
         async with httpx.AsyncClient(timeout=3) as client:
             response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
             response.raise_for_status(); wg=response.json()
-        await websocket.send_json({'type':'wireguard',**wg,'requested_enabled':bool(wg.get('enabled'))})
+        await websocket.send_json({'type':'wireguard',**wg,'requested_enabled':bool(wg.get('requested_enabled', wg.get('enabled')))})
         while True: await websocket.receive_text()
     except WebSocketDisconnect:
         app.state.wireguard_clients.discard(websocket)
