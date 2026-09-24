@@ -82,6 +82,16 @@ def _materialize_config():
     return RUNTIME_CONFIG
 
 
+def _persist_enabled(enabled: bool):
+    try:
+        from database import db
+        c = db()
+        c.execute("INSERT INTO app_settings(key,value) VALUES('wireguard_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ("1" if enabled else "0",))
+        c.commit(); c.close()
+    except Exception:
+        pass
+
+
 def set_enabled(enabled: bool):
     global _state
     with _lock:
@@ -91,6 +101,7 @@ def set_enabled(enabled: bool):
             if not is_up():
                 _run("wg-quick", "up", _materialize_config())
             _state = True
+            _persist_enabled(True)
         else:
             if is_up():
                 _run("wg-quick", "down", INTERFACE)
@@ -99,12 +110,40 @@ def set_enabled(enabled: bool):
             except OSError:
                 pass
             _state = False
+            _persist_enabled(False)
 
 
 def setting_enabled():
-    """Return the live runtime toggle; enabled state is intentionally not persisted."""
+    """Return the persisted desired state, falling back to runtime state."""
     with _lock:
+        try:
+            from database import db
+            c = db()
+            row = c.execute("SELECT value FROM app_settings WHERE key='wireguard_enabled'").fetchone()
+            c.close()
+            if row is not None:
+                return row["value"] == "1"
+        except Exception:
+            pass
         return bool(_state)
+
+
+def restore_persisted_state():
+    """Restore the last enabled state after worker/server restart."""
+    if not setting_enabled():
+        return False
+    def restore():
+        for attempt in range(10):
+            try:
+                set_enabled(True)
+                return
+            except Exception as exc:
+                with _lock:
+                    global _operation_error
+                    _operation_error = f"startup restore attempt {attempt + 1}: {type(exc).__name__}: {exc}"
+                time.sleep(min(2 ** attempt, 30))
+    threading.Thread(target=restore, name="wireguard-startup-restore", daemon=True).start()
+    return True
 
 
 def run(enabled, func):
