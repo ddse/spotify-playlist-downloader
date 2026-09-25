@@ -253,6 +253,30 @@ class WireGuardManagerTests(unittest.TestCase):
 
         run.assert_called_once_with("wg-quick", "down", self.wireguard.INTERFACE)
 
+    def test_disable_tolerates_interface_disappearing_during_wg_quick_down(self):
+        with patch.object(
+            self.wireguard, "is_up", side_effect=[True, False]
+        ), patch.object(
+            self.wireguard,
+            "_run",
+            side_effect=subprocess.CalledProcessError(
+                1, ["wg-quick", "down", self.wireguard.INTERFACE]
+            ),
+        ) as run:
+            self.wireguard.set_enabled(False)
+
+        run.assert_called_once_with("wg-quick", "down", self.wireguard.INTERFACE)
+
+    def test_disable_still_raises_when_wg_quick_down_fails_and_interface_remains_up(self):
+        error = subprocess.CalledProcessError(
+            1, ["wg-quick", "down", self.wireguard.INTERFACE]
+        )
+        with patch.object(
+            self.wireguard, "is_up", side_effect=[True, True]
+        ), patch.object(self.wireguard, "_run", side_effect=error):
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.wireguard.set_enabled(False)
+
     def test_enable_fails_when_config_is_missing(self):
         self.wireguard.CONFIG = str(Path(self.tmp.name) / "missing.conf")
 
