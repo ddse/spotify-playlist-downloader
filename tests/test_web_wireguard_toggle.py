@@ -4,13 +4,14 @@ from pathlib import Path
 SETTINGS = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "Settings.jsx"
 
 
-def test_wireguard_toggle_does_not_disable_during_connecting_or_disconnecting():
+def test_wireguard_toggle_waits_for_authoritative_transition_state():
     text = SETTINGS.read_text(encoding="utf-8")
     marker = "<button type=\"button\" onClick={()=>toggleWireguard(!wireguard?.requested_enabled)}"
     start = text.index(marker)
     button = text[start:text.index("</button>", start) + len("</button>")]
-    assert "wireguard?.status==='connecting'" not in button
-    assert "wireguard?.status==='disconnecting'" not in button
+    assert "!!wireguard?.operation" in button
+    assert "wireguard?.operation==='connecting'" in button
+    assert "wireguard?.operation==='disconnecting'" in button
     assert "(!wireguard?.requested_enabled&&!wireguard?.configured)" in button
 
 
@@ -47,3 +48,16 @@ def test_wireguard_enable_state_is_not_persisted_to_local_storage():
     app = (Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx").read_text(encoding="utf-8")
     assert "music-wireguard" not in settings
     assert "music-wireguard" not in app
+
+def test_wireguard_websocket_reconnects_after_disconnect():
+    text = SETTINGS.read_text(encoding="utf-8")
+    assert "ws.onclose=()=>{if(!stopped)retry=setTimeout(connect,1000)}" in text
+    assert "let stopped=false" in text
+    assert "clearTimeout(retry)" in text
+
+
+def test_wireguard_toggle_keeps_transition_state_until_terminal_status():
+    text = SETTINGS.read_text(encoding="utf-8")
+    assert "operation:enabled?'connecting':'disconnecting'" in text
+    assert "setTogglingWireguard(true)" in text
+    assert "next.operation" in text
