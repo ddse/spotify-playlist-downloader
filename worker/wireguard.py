@@ -191,7 +191,7 @@ def debug_status():
     try:
         current = status()
         return {
-            "requested_enabled": setting_enabled(),
+            "requested_enabled": requested_enabled,
             "interface": current.get("interface", INTERFACE),
             "config_exists": bool(current.get("config_exists")),
             "interface_up": bool(current.get("enabled")),
@@ -284,14 +284,21 @@ def status():
         up = is_up()
         route_active, routes = _route_status() if up else (False, [])
         handshake_recent, peers = _handshake_status() if up else (False, [])
+        # Public-IP detection is diagnostic only. A slow/unreachable ipify
+        # endpoint must never turn an otherwise established WireGuard tunnel
+        # into a false "connecting" state.
         public_ip = _public_ip() if up and route_active else ""
-        vpn_route = up and route_active and handshake_recent and bool(public_ip)
+        vpn_route = up and route_active and handshake_recent
+
+        # During an asynchronous transition, expose the requested target rather
+        # than the last persisted preference.
+        requested_enabled = (operation == "connecting") if operation else setting_enabled()
         if operation:
             status = operation
             status_detail = (
                 "WireGuard is connecting; waiting for the tunnel handshake"
                 if operation == "connecting"
-                else "WireGuard is disconnecting"
+                else "WireGuard is disconnecting; waiting for the interface to go down"
             )
             if operation_error:
                 status_detail += f": {operation_error}"
@@ -303,15 +310,11 @@ def status():
             status_detail = "Interface is up; waiting for WireGuard routing"
         elif not handshake_recent:
             # An active route without a recent handshake is not an established VPN.
-            # Keep the UI in the connection phase until the peer has handshaken.
             status = "connecting"
             status_detail = "Route is active; waiting for a recent peer handshake"
-        elif not public_ip:
-            status = "connecting"
-            status_detail = "Tunnel handshake is recent; waiting for public IP detection"
         else:
             status = "connected"
-            status_detail = "WireGuard tunnel is connected and routed"
+            status_detail = "WireGuard interface, route, and peer handshake are active"
         transfer = {"receive_bytes": 0, "send_bytes": 0}
         try:
             raw = subprocess.run(
