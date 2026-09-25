@@ -582,14 +582,25 @@ def _search_result_for_ui(result):
 
 
 @app.get('/api/search/youtube')
-async def search_youtube(q:str='',page:int=1,limit:int=10,debug:int=0):
+async def search_youtube(q:str='',page:int=1,limit:int=10,wireguard:int=0,debug:int=0):
     if not q.strip(): return {'items':[],'page':page,'limit':limit,'has_more':False}
+    use_wireguard = bool(wireguard)
     try:
         return _search_result_for_ui(
-            await youtube_search(q,page=page,limit=limit,wireguard=await wireguard_enabled(),debug=bool(debug))
+            await youtube_search(q,page=page,limit=limit,wireguard=use_wireguard,debug=bool(debug))
         )
     except Exception as e:
-        return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
+        payload={'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
+        if debug:
+            payload['debug']={
+                'request_received': True,
+                'source': 'youtube',
+                'query': q.strip(),
+                'wireguard_requested': use_wireguard,
+                'wireguard_used': use_wireguard,
+                'steps': [{'step':'web_search_error','status':'error','error':f'{type(e).__name__}: {e}'}],
+            }
+        return payload
 
 @app.get('/api/search/zingmp3')
 async def search_zingmp3(q:str='',page:int=1,limit:int=10,debug:int=0):
