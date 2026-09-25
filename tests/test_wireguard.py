@@ -275,11 +275,11 @@ class WireGuardManagerTests(unittest.TestCase):
         ) as run:
             self.wireguard.set_enabled(False)
 
-        run.assert_called_once_with("wg-quick", "down", self.wireguard.INTERFACE)
+        run.assert_called_once_with("wg-quick", "down", self.wireguard.RUNTIME_CONFIG)
 
     def test_disable_still_raises_when_wg_quick_down_fails_and_interface_remains_up(self):
         error = subprocess.CalledProcessError(
-            1, ["wg-quick", "down", self.wireguard.INTERFACE]
+            1, ["wg-quick", "down", self.wireguard.RUNTIME_CONFIG]
         )
         with patch.object(
             self.wireguard, "is_up", side_effect=[True, True]
