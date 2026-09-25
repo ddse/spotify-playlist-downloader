@@ -162,7 +162,9 @@ def test_update_track_title_rejects_downloading_track(tmp_path, monkeypatch):
 
 def test_download_request_persists_title_override(tmp_path, monkeypatch):
     connect, client = _client(tmp_path, monkeypatch)
-    monkeypatch.setattr(web_app, "wireguard_enabled", lambda: False)
+    async def fake_wireguard_enabled():
+        return False
+    monkeypatch.setattr(web_app, "wireguard_enabled", fake_wireguard_enabled)
     r = client.post("/api/download", data={
         "source_url": "https://www.youtube.com/watch?v=test123",
         "title": "My Custom Song",
