@@ -297,6 +297,34 @@ class WireGuardManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "connecting")
         self.assertIn("waiting for a recent peer handshake", result["status_detail"])
 
+    def test_status_uses_transition_target_while_connecting(self):
+        self.wireguard._operation = "connecting"
+        try:
+            with patch.object(self.wireguard, "is_up", return_value=False):
+                result = self.wireguard.status()
+            self.assertTrue(result["requested_enabled"])
+            self.assertEqual(result["operation"], "connecting")
+            self.assertEqual(result["status"], "connecting")
+        finally:
+            self.wireguard._operation = None
+
+    def test_status_uses_transition_target_while_disconnecting(self):
+        self.wireguard._operation = "disconnecting"
+        try:
+            with patch.object(self.wireguard, "is_up", return_value=True),                  patch.object(self.wireguard, "_route_status", return_value=(False, [])),                  patch.object(self.wireguard, "_handshake_status", return_value=(False, [])),                  patch.object(self.wireguard, "_public_ip", return_value=""):
+                result = self.wireguard.status()
+            self.assertFalse(result["requested_enabled"])
+            self.assertEqual(result["operation"], "disconnecting")
+            self.assertEqual(result["status"], "disconnecting")
+        finally:
+            self.wireguard._operation = None
+
+    def test_status_does_not_require_public_ip_for_connected_state(self):
+        with patch.object(self.wireguard, "is_up", return_value=True),              patch.object(self.wireguard, "_route_status", return_value=(True, ["default dev wg0 table 51820"])),              patch.object(self.wireguard, "_handshake_status", return_value=(True, [{"public_key": "peer", "age_seconds": 5}])),              patch.object(self.wireguard, "_public_ip", return_value=""):
+            result = self.wireguard.status()
+        self.assertTrue(result["vpn_route"])
+        self.assertEqual(result["status"], "connected")
+
     def test_status_reports_disconnected_when_interface_is_down(self):
         with patch.object(self.wireguard, "is_up", return_value=False):
             result = self.wireguard.status()
