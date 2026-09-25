@@ -104,7 +104,15 @@ def set_enabled(enabled: bool):
             _persist_enabled(True)
         else:
             if is_up():
-                _run("wg-quick", "down", INTERFACE)
+                try:
+                    _run("wg-quick", "down", INTERFACE)
+                except subprocess.CalledProcessError:
+                    # wg-quick down is not idempotent: the interface may have
+                    # disappeared between is_up() and the down command. Treat
+                    # that race as an already-disconnected state, but preserve
+                    # real failures while the interface is still present.
+                    if is_up():
+                        raise
             try:
                 os.remove(RUNTIME_CONFIG)
             except OSError:
