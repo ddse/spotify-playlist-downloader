@@ -3,7 +3,7 @@ MAX_SEARCH_RESULTS = 50
 
 def search(query, page=1, limit=10):
     page=max(1,int(page)); limit=max(1,min(int(limit),10)); end=min(MAX_SEARCH_RESULTS,page*limit)
-    with yt_dlp.YoutubeDL({"extract_flat":True,"skip_download":True,"quiet":True,"no_warnings":True,"noplaylist":False}) as ydl:
+    with yt_dlp.YoutubeDL({"extract_flat":True,"skip_download":True,"quiet":True,"no_warnings":True,"noplaylist":False,"socket_timeout":10,"retries":0,"extractor_retries":0}) as ydl:
         data=ydl.extract_info(f"ytsearch{end}:{query}",download=False)
     items=[]
     for e in data.get("entries") or []:
