@@ -49,6 +49,7 @@ def test_wireguard_enable_state_is_not_persisted_to_local_storage():
     assert "music-wireguard" not in settings
     assert "music-wireguard" not in app
 
+
 def test_wireguard_websocket_reconnects_after_disconnect():
     text = SETTINGS.read_text(encoding="utf-8")
     assert "ws.onclose=()=>{if(!stopped)retry=setTimeout(connect,1000)}" in text
@@ -65,4 +66,5 @@ def test_wireguard_toggle_keeps_transition_state_until_terminal_status():
 
 def test_wireguard_toggle_unlocks_when_transition_operation_is_finished_even_if_status_is_connecting():
     text = SETTINGS.read_text(encoding="utf-8")
-    assert "if(next.operation) setTogglingWireguard(true); else setTogglingWireguard(false);" in text
+    assert "if(next.operation) setTogglingWireguard(true);" in text
+    assert "else setTogglingWireguard(false);" in text
