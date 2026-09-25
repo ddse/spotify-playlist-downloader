@@ -8,6 +8,7 @@ import pytest
 
 from worker import search as worker_search
 from web import youtube as web_youtube
+from web import app as web_app
 
 
 class FakeProvider:
@@ -186,6 +187,27 @@ def test_web_to_worker_search_client_integration(worker_endpoint):
     assert payload["items"][0]["id"] == "video-4"
     assert payload["debug"]["web_to_worker"]["status"] == "ok"
     assert payload["debug"]["web_to_worker"]["http_status"] == 200
+
+
+def test_web_search_endpoint_honors_wireguard_query_and_debug_error():
+    async def failing_search(query, page, limit, source="youtube", wireguard=False, debug=False):
+        assert query == "faded"
+        assert page == 1
+        assert limit == 10
+        assert wireguard is False
+        assert debug is True
+        raise RuntimeError("provider unavailable")
+
+    async def run():
+        with patch.object(web_app, "youtube_search", failing_search):
+            return await web_app.search_youtube(q="faded", page=1, limit=10, wireguard=0, debug=1)
+
+    payload = asyncio.run(run())
+    assert payload["items"] == []
+    assert payload["error"] == "provider unavailable"
+    assert payload["debug"]["wireguard_requested"] is False
+    assert payload["debug"]["wireguard_used"] is False
+    assert payload["debug"]["steps"][-1]["step"] == "web_search_error"
 
 
 def test_web_to_worker_search_non_debug_raises_on_worker_failure(worker_endpoint):
