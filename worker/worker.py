@@ -300,6 +300,46 @@ def download_zingmp3(row, c, track_id):
     return str(output.resolve())
 
 
+def _safe_filename_component(value, fallback='Unknown Title'):
+    value = re.sub(r'[\\x00-\\x1f\\x7f]+', ' ', str(value or '')).strip()
+    value = re.sub(r'[\\\\/:*?"<>|]+', '_', value)
+    value = re.sub(r'\\s+', ' ', value).strip(' .')
+    return (value or fallback)[:200]
+
+
+def resolve_direct_link_metadata(row, c, track_id, url):
+    """Use yt-dlp metadata for raw links so filenames are based on media title."""
+    if (row['source_type'] or '') != 'url' or int(row['title_override'] or 0):
+        return row['title'], row['artists'], row['album']
+    try:
+        opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+            'noplaylist': True,
+            'extract_flat': False,
+            'js_runtimes': {'deno': {'path': '/usr/local/bin/deno'}},
+        }
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+        title = info.get('track') or info.get('title') or row['title'] or 'Unknown Title'
+        artists = info.get('artist') or info.get('uploader') or info.get('channel') or row['artists'] or 'Unknown Artist'
+        album = info.get('album') or row['album'] or 'YouTube'
+        title = _safe_filename_component(title)
+        artists = _safe_filename_component(artists, 'Unknown Artist')
+        album = _safe_filename_component(album, 'YouTube')
+        c.execute(
+            'UPDATE tracks SET title=?,artists=?,album=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?',
+            (title, artists, album, track_id),
+        )
+        c.commit()
+        logger.info('direct-link metadata resolved track=%s title=%r artist=%r album=%r', track_id, title, artists, album)
+        return title, artists, album
+    except Exception as exc:
+        logger.warning('direct-link metadata lookup failed track=%s url=%s error=%s', track_id, url, exc)
+        return row['title'], row['artists'], row['album']
+
+
 def download(row, c, track_id, download_started_at=0):
     Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
     source_mode = row['source_mode'] or 'single'
@@ -311,9 +351,10 @@ def download(row, c, track_id, download_started_at=0):
     if not url:
         raise RuntimeError('No download source selected')
 
-    artist = (row['artists'] or 'Unknown Artist').replace('/', '_')
-    album = (row['album'] or 'YouTube').replace('/', '_')
-    title = (row['title'] or 'Unknown Title').replace('/', '_')
+    title, artists, album = resolve_direct_link_metadata(row, c, track_id, url)
+    artist = _safe_filename_component(artists, 'Unknown Artist')
+    album = _safe_filename_component(album, 'YouTube')
+    title = _safe_filename_component(title)
     custom_folder = (row['download_folder'] or '').strip()
     if custom_folder:
         safe = Path(custom_folder)
