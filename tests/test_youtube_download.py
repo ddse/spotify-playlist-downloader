@@ -48,7 +48,7 @@ def test_youtube_download_uses_current_client_fallback_and_deno_runtime(tmp_path
     assert FakeYDL.captured["extractor_args"] == {
         "youtube": {"player_client": ["default", "web_embedded"]}
     }
-    assert FakeYDL.captured["js_runtimes"] == {"deno": "/usr/local/bin/deno"}
+    assert FakeYDL.captured["js_runtimes"] == {"deno": {"path": "/usr/local/bin/deno"}}
 
 
 def test_youtube_player_clients_can_be_overridden(monkeypatch):
