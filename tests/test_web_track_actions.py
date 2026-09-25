@@ -138,3 +138,51 @@ def test_frontend_bulk_actions_use_bulk_endpoint():
     assert "fd.append('ids',selected.join(','))" in text
     assert "fetch('/api/queue/bulk',{method:'POST',body:fd})" in text
     assert "fetch('/api/queue?track_id=bulk'" not in text
+
+
+def test_update_track_title_renames_completed_file(tmp_path, monkeypatch):
+    connect, client = _client(tmp_path, monkeypatch)
+    music = tmp_path / "music"; music.mkdir(); media = music / "old-name.mp3"; media.write_bytes(b"fake mp3")
+    _seed(connect, "completed", str(media))
+    r = client.post("/api/tracks/title", params={"track_id": TRACK_ID}, data={"title": "New Song / Live"})
+    assert r.status_code == 200
+    payload = r.json()
+    renamed = music / "New Song _ Live.mp3"
+    assert payload["ok"] is True and payload["title"] == "New Song _ Live"
+    assert renamed.exists() and not media.exists()
+    c = connect(); row = c.execute("SELECT title,title_override,file_path FROM tracks WHERE spotify_id=?", (TRACK_ID,)).fetchone(); c.close()
+    assert tuple(row) == ("New Song _ Live", 1, str(renamed))
+
+
+def test_update_track_title_rejects_downloading_track(tmp_path, monkeypatch):
+    connect, client = _client(tmp_path, monkeypatch); _seed(connect, "downloading")
+    r = client.post("/api/tracks/title", params={"track_id": TRACK_ID}, data={"title": "New title"})
+    assert r.status_code == 409
+
+
+def test_download_request_persists_title_override(tmp_path, monkeypatch):
+    connect, client = _client(tmp_path, monkeypatch)
+    monkeypatch.setattr(web_app, "wireguard_enabled", lambda: False)
+    r = client.post("/api/download", data={
+        "source_url": "https://www.youtube.com/watch?v=test123",
+        "title": "My Custom Song",
+        "title_override": "1",
+        "artists": "Artist", "album": "Album", "youtube_id": "test123",
+        "source_mode": "single", "download_type": "audio", "download_format": "mp3",
+        "download_quality": "320", "video_codec": "auto", "download_folder": "",
+        "thumbnail": "1", "subtitle": "0", "subtitle_lang": "ja,en",
+        "subtitle_mode": "prefer_manual", "playlist_item_limit": "0",
+        "split_chapters": "0", "auto_start": "0", "wireguard": "0",
+    })
+    assert r.status_code == 200
+    c = connect(); row = c.execute("SELECT title,title_override FROM tracks WHERE title=?", ("My Custom Song",)).fetchone(); c.close()
+    assert tuple(row) == ("My Custom Song", 1)
+
+
+def test_frontend_supports_title_override_and_direct_link_metadata_ui():
+    source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
+    text = source.read_text(encoding="utf-8")
+    assert 'name="title" value={title}' in text
+    assert "fd.set('title_override'" in text
+    assert '/api/tracks/title?track_id=' in text
+    assert 'function QueueRow' in text
