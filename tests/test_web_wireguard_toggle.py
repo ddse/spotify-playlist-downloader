@@ -6,7 +6,7 @@ SETTINGS = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "S
 
 def test_wireguard_toggle_waits_for_authoritative_transition_state():
     text = SETTINGS.read_text(encoding="utf-8")
-    marker = "<button type=\"button\" onClick={()=>toggleWireguard(!wireguard?.requested_enabled)}"
+    marker = "<button type=\"button\" onClick={()=>toggleWireguard(!wireguard?.enabled)}"
     start = text.index(marker)
     button = text[start:text.index("</button>", start) + len("</button>")]
     assert "!!wireguard?.operation" in button
