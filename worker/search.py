@@ -1,6 +1,8 @@
 import json
 import time
 import errno
+import os
+import threading
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -13,6 +15,7 @@ except ImportError:  # pragma: no cover - supports running search.py directly
 PAGE_SIZE = 10
 HOST = "0.0.0.0"
 PORT = 8090
+PROVIDER_TIMEOUT_SECONDS = float(os.getenv("SEARCH_PROVIDER_TIMEOUT_SECONDS", "30"))
 
 
 def search(query: str, page: int = 1, limit: int = PAGE_SIZE, source: str = "youtube", wireguard=None, debug=False):
@@ -49,7 +52,25 @@ def search(query: str, page: int = 1, limit: int = PAGE_SIZE, source: str = "you
                 return provider(query, page, limit, debug=True)
             return provider(query, page, limit)
 
-        result = manager.run(use_wireguard, call_provider)
+        result_box = {}
+        error_box = {}
+
+        def run_provider():
+            try:
+                result_box["result"] = manager.run(use_wireguard, call_provider)
+            except BaseException as exc:
+                error_box["error"] = exc
+
+        provider_thread = threading.Thread(target=run_provider, name="search-provider", daemon=True)
+        provider_thread.start()
+        provider_thread.join(timeout=PROVIDER_TIMEOUT_SECONDS)
+        if provider_thread.is_alive():
+            raise TimeoutError(
+                f"search provider timed out after {PROVIDER_TIMEOUT_SECONDS:g}s"
+            )
+        if "error" in error_box:
+            raise error_box["error"]
+        result = result_box["result"]
         provider_debug = result.pop("_provider_debug", None) if isinstance(result, dict) else None
         if provider_debug:
             trace["provider_debug"] = provider_debug
