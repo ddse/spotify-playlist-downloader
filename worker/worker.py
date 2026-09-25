@@ -13,7 +13,7 @@ from providers.nhaccuatui import get_stream_url as nct_get_stream_url
 import re
 import urllib.request
 import xml.etree.ElementTree as ET
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 DEBUG_MODE = os.getenv('DEBUG', '0').lower() in {'1', 'true', 'yes', 'on', 'debug'}
 LOG_LEVEL = 'DEBUG' if DEBUG_MODE else os.getenv('LOG_LEVEL', 'INFO').upper()
@@ -21,6 +21,34 @@ logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO),
                     format='%(asctime)s %(levelname)s [worker] %(message)s')
 logger = logging.getLogger('worker')
 logger.info('Worker logging initialized debug=%s log_level=%s', DEBUG_MODE, LOG_LEVEL)
+
+def normalize_youtube_url(url, source_mode='single'):
+    """Normalize a YouTube watch URL for single-item downloads.
+
+    YouTube copy/share links often contain playlist/radio parameters such as
+    ``list`` and ``start_radio``. When the UI queues a single item, those
+    parameters are not part of the selected video and can make extraction
+    ambiguous. Keep the video id (and an optional timestamp) only.
+    """
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or '').lower()
+        if source_mode != 'single' or host not in {'youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be'}:
+            return url
+        if host == 'youtu.be':
+            video_id = parsed.path.lstrip('/').split('/')[0]
+        else:
+            video_id = (parse_qs(parsed.query).get('v') or [''])[0]
+        if not video_id:
+            return url
+        original = parse_qs(parsed.query)
+        query = {'v': [video_id]}
+        for key in ('t', 'start'):
+            if original.get(key):
+                query[key] = [original[key][0]]
+        return urlunparse(('https', 'www.youtube.com', '/watch', '', urlencode(query, doseq=True), ''))
+    except Exception:
+        return url
 
 def is_zingmp3(url):
     try:
@@ -273,8 +301,8 @@ def download_zingmp3(row, c, track_id):
 
 def download(row, c, track_id, download_started_at=0):
     Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
-    url = row['source_url']
     source_mode = row['source_mode'] or 'single'
+    url = normalize_youtube_url(row['source_url'], source_mode)
     if is_zingmp3(url):
         return download_zingmp3(row, c, track_id)
     if is_nhaccuatui(url):
