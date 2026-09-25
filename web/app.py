@@ -58,6 +58,15 @@ def detect_source_type(url):
         return 'tiktok'
     return 'url'
 
+def normalize_track_title(value: str, fallback: str = 'Unknown Title') -> str:
+    """Normalize a user/provider title for filesystem-safe media names."""
+    value = re.sub(r'[\x00-\x1f\x7f]+', ' ', str(value or '')).strip()
+    value = re.sub(r'[\\/:*?"<>|]+', '_', value)
+    value = re.sub(r'\s+', ' ', value).strip(' .')
+    if not value:
+        value = fallback
+    return value[:200]
+
 def pid(url):
     m=re.search(r'playlist/([A-Za-z0-9]+)',url); return m.group(1) if m else url.rstrip('/').split('/')[-1].split('?')[0]
 
@@ -630,8 +639,10 @@ async def search_nhaccuatui(q:str='',page:int=1,limit:int=10,debug:int=0):
         return {'items':[],'page':page,'limit':limit,'has_more':False,'error':str(e)}
 
 @app.post('/api/download')
-async def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),source_mode:str=Form('single'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1'),wireguard:str=Form('0')):
+async def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form(''),album:str=Form(''),youtube_id:str=Form(''),title_override:str=Form('0'),source_mode:str=Form('single'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('best'),video_codec:str=Form('auto'),download_folder:str=Form(''),thumbnail:str=Form('1'),subtitle:str=Form('0'),subtitle_lang:str=Form('ja,en'),subtitle_mode:str=Form('prefer_manual'),playlist_item_limit:str=Form('0'),split_chapters:str=Form('0'),auto_start:str=Form('1'),wireguard:str=Form('0')):
     source_url = _restore_proxied_outlink(source_url)
+    title = normalize_track_title(title)
+    title_override_value = 1 if str(title_override).lower() in {'1','true','yes','on'} else 0
     download_type = download_type if download_type in ('audio', 'video', 'captions', 'thumbnail') else 'audio'
     source_mode = source_mode if source_mode in {'single','playlist','channel'} else 'single'
     audio_formats = {'m4a','mp3','opus','wav','flac'}
@@ -690,17 +701,18 @@ async def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form
         'split_chapters': chapters,
         'auto_start': start,
         'wireguard': use_wireguard,
+        'title_override': title_override_value,
     }
     c.execute('''INSERT INTO tracks(
         spotify_id,title,artists,album,spotify_url,status,progress,error,
         source_type,source_url,download_type,download_format,download_quality,
         video_codec,download_folder,source_mode,thumbnail,subtitle,
-        subtitle_lang,subtitle_mode,playlist_item_limit,split_chapters,auto_start,wireguard,priority
+        subtitle_lang,subtitle_mode,playlist_item_limit,split_chapters,auto_start,wireguard,title_override,priority
     ) VALUES(
         :spotify_id,:title,:artists,:album,:spotify_url,'queued',0,NULL,
         :source_type,:source_url,:download_type,:download_format,:download_quality,
         :video_codec,:download_folder,:source_mode,:thumbnail,:subtitle,
-        :subtitle_lang,:subtitle_mode,:playlist_item_limit,:split_chapters,:auto_start,:wireguard,0
+        :subtitle_lang,:subtitle_mode,:playlist_item_limit,:split_chapters,:auto_start,:wireguard,:title_override,0
     )
     ON CONFLICT(spotify_id) DO UPDATE SET
         title=excluded.title, artists=excluded.artists, album=excluded.album,
@@ -712,11 +724,45 @@ async def download(source_url:str=Form(...),title:str=Form(...),artists:str=Form
         subtitle_lang=excluded.subtitle_lang, subtitle_mode=excluded.subtitle_mode,
         playlist_item_limit=excluded.playlist_item_limit,
         split_chapters=excluded.split_chapters, auto_start=excluded.auto_start, wireguard=excluded.wireguard,
+        title_override=excluded.title_override,
         status=CASE WHEN tracks.status='completed' THEN tracks.status ELSE 'queued' END,
         progress=CASE WHEN tracks.status='completed' THEN tracks.progress ELSE 0 END,
         error=NULL, updated_at=CURRENT_TIMESTAMP''', params)
     c.commit(); c.close()
     return {'ok': True, 'id': key, 'status': 'queued'}
+
+@app.post('/api/tracks/title')
+def update_track_title(track_id: str = Query(...), title: str = Form(...)):
+    title = normalize_track_title(title)
+    c = db()
+    row = c.execute("SELECT * FROM tracks WHERE spotify_id=?", (track_id,)).fetchone()
+    if not row:
+        c.close()
+        raise HTTPException(404, 'track not found')
+    if row['status'] == 'downloading':
+        c.close()
+        raise HTTPException(409, 'cannot rename a downloading track')
+
+    old_path = (row['file_path'] or '').strip()
+    new_path = ''
+    if row['status'] == 'completed' and old_path:
+        music = Path(os.getenv('MUSIC_DIR', '/music')).resolve()
+        source = Path(old_path).resolve()
+        if source.is_file() and music in source.parents:
+            destination = source.with_name(title + source.suffix)
+            if destination != source:
+                if destination.exists():
+                    c.close()
+                    raise HTTPException(409, 'target filename already exists')
+                source.rename(destination)
+            new_path = str(destination)
+
+    c.execute(
+        "UPDATE tracks SET title=?,title_override=1,file_path=CASE WHEN ?='' THEN file_path ELSE ? END,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
+        (title, new_path, new_path, track_id),
+    )
+    c.commit(); c.close()
+    return {'ok': True, 'title': title, 'file_path': new_path}
 
 @app.post('/api/queue/start')
 def start_queue(track_id:str=Query(...)):
@@ -733,7 +779,7 @@ def prioritize_queue(track_id:str=Query(...)):
 @app.post('/api/import/youtube')
 def import_youtube(source_url:str=Form(...),source_mode:str=Form('playlist'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('320'),download_folder:str=Form('YouTube'),playlist_item_limit:str=Form('0')):
     title = source_url.rstrip('/').split('/')[-1].split('?')[0] or 'YouTube import'
-    return download(source_url=source_url,title=title,artists='YouTube',album=source_mode,youtube_id='',source_mode=source_mode,download_type=download_type,download_format=download_format,download_quality=download_quality,video_codec='auto',download_folder=download_folder,thumbnail='1',subtitle='0',subtitle_lang='ja,en',subtitle_mode='prefer_manual',playlist_item_limit=playlist_item_limit,split_chapters='0',auto_start='1')
+    return download(source_url=source_url,title=title,artists='YouTube',title_override='0',album=source_mode,youtube_id='',source_mode=source_mode,download_type=download_type,download_format=download_format,download_quality=download_quality,video_codec='auto',download_folder=download_folder,thumbnail='1',subtitle='0',subtitle_lang='ja,en',subtitle_mode='prefer_manual',playlist_item_limit=playlist_item_limit,split_chapters='0',auto_start='1')
 
 @app.post('/api/queue/bulk')
 def queue_bulk(action:str=Form(...),ids:str=Form('')):
