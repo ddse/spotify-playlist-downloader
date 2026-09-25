@@ -57,7 +57,25 @@ export default function Settings({onClose}) {
   const set=(k,v)=>setItems(x=>({...x,[selected]:{...item,config:{...(x[selected]?.config||{}),[k]:v}}}));
   const save=async()=>{setSaving(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:item.enabled,config})});setItems(x=>({...x,[selected]:d}));setMessage('Saved. No restart required.')}catch(e){setMessage(e.message)}finally{setSaving(false)}};
   const saveWireguard=async()=>{setSavingWireguard(true);setMessage('');try{const d=await api('/api/settings/wireguard',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({config:wireguardConfig})});setWireguard(x=>({...x,...d,config_exists:d.configured}));setWireguardConfig('');setMessage('WireGuard configuration saved. It will not be shown again.')}catch(e){setMessage(e.message)}finally{setSavingWireguard(false)}};
-  const toggleWireguard=async(enabled)=>{setTogglingWireguard(true);setMessage('');setWireguard(x=>({...x,requested_enabled:enabled,operation:enabled?'connecting':'disconnecting',status:enabled?'connecting':'disconnecting'}));try{const fd=new FormData();fd.append('enabled',enabled?'1':'0');const d=await api('/api/settings/wireguard',{method:'POST',body:fd});setWireguard(x=>({...x,...d,requested_enabled:enabled}));window.dispatchEvent(new Event('wireguard-setting'));setMessage(enabled?'WireGuard connecting...':'WireGuard disconnecting...')}catch(e){setWireguard(x=>({...x,requested_enabled:!enabled,operation:undefined,status:'error',status_detail:e.message}));setMessage(e.message);setTogglingWireguard(false)}};
+  const toggleWireguard=async(enabled)=>{
+    setTogglingWireguard(true);
+    setMessage('');
+    setWireguard(x=>({...x,requested_enabled:enabled}));
+    setWireguard(x=>({...x,operation:enabled?'connecting':'disconnecting',status:enabled?'connecting':'disconnecting'}));
+    try{
+      const fd=new FormData();
+      fd.append('enabled',enabled?'1':'0');
+      const d=await api('/api/settings/wireguard',{method:'POST',body:fd});
+      setWireguard(x=>({...x,...d,requested_enabled:enabled}));
+      window.dispatchEvent(new Event('wireguard-setting'));
+      setMessage(enabled?'WireGuard connecting...':'WireGuard disconnecting...');
+    }catch(e){
+      setWireguard(x=>({...x,requested_enabled:!enabled}));
+      setWireguard(x=>({...x,operation:undefined,status:'error',status_detail:e.message}));
+      setMessage(e.message);
+      setTogglingWireguard(false);
+    }
+  };
   const test=async()=>{setTesting(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected+'/test',{method:'POST'});setMessage(d.ok?'Connection test successful':(d.error||'Connection test failed'));setItems(x=>({...x,[selected]:{...x[selected],status:d.status,error:d.error||''}}));}catch(e){setMessage(e.message)}finally{setTesting(false)}};
   const currentConfigured=!!item.configured;
   const statusTone=item.status==='connected'||item.status==='ok'?'text-emerald-300':item.status==='error'?'text-red-300':'text-zinc-400';
