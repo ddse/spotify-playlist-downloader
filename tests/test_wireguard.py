@@ -261,7 +261,7 @@ class WireGuardManagerTests(unittest.TestCase):
         ), patch.object(self.wireguard, "_run") as run:
             self.wireguard.set_enabled(False)
 
-        run.assert_called_once_with("wg-quick", "down", self.wireguard.INTERFACE)
+        run.assert_called_once_with("wg-quick", "down", self.wireguard.RUNTIME_CONFIG)
 
     def test_disable_tolerates_interface_disappearing_during_wg_quick_down(self):
         with patch.object(
@@ -270,7 +270,7 @@ class WireGuardManagerTests(unittest.TestCase):
             self.wireguard,
             "_run",
             side_effect=subprocess.CalledProcessError(
-                1, ["wg-quick", "down", self.wireguard.INTERFACE]
+                1, ["wg-quick", "down", self.wireguard.RUNTIME_CONFIG]
             ),
         ) as run:
             self.wireguard.set_enabled(False)
