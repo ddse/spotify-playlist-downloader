@@ -353,3 +353,16 @@ class WorkerApiHandlerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_disable_persists_requested_state_before_async_transition(monkeypatch):
+    persisted = []
+    monkeypatch.setattr(wireguard, "_persist_enabled", lambda enabled: persisted.append(enabled))
+    monkeypatch.setattr(wireguard, "set_enabled", lambda enabled: None)
+    assert wireguard.apply_enabled_async(False) is True
+    for _ in range(100):
+        if wireguard._operation is None:
+            break
+        import time; time.sleep(0.01)
+    assert persisted[0] is False
+    assert wireguard.setting_enabled() is False
