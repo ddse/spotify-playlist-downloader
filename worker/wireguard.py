@@ -330,7 +330,7 @@ def status():
             pass
         return {
             "enabled": up,
-            "requested_enabled": setting_enabled(),
+            "requested_enabled": requested_enabled,
             "interface": INTERFACE,
             "config_path": "database://wireguard_config",
             "config_source": "database" if config_configured() else ("live_interface" if up else "missing"),
