@@ -403,7 +403,7 @@ def download(row, c, track_id, download_started_at=0):
                 'player_client': YOUTUBE_PLAYER_CLIENTS,
             },
         },
-        'js_runtimes': {'deno': '/usr/local/bin/deno'},
+        'js_runtimes': {'deno': {'path': '/usr/local/bin/deno'}},
     }
 
     if download_type == 'audio':
