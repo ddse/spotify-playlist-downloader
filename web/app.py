@@ -200,8 +200,10 @@ async def wireguard_settings():
                 'peer_count': int(wg.get('peer_count', 0)),
             })
     except Exception as e:
-        result['requested_enabled'] = False
-        result['status'] = 'connecting' if result['requested_enabled'] else ('disconnected' if configured else 'unavailable')
+        # Do not overwrite the last known requested target just because the
+        # worker status endpoint is temporarily unavailable.
+        result['status'] = 'unavailable'
+        result['status_detail'] = 'WireGuard worker status unavailable'
         result['detail'] = str(e)
     return result
 
@@ -252,14 +254,19 @@ async def wireguard_toggle(enabled: bool = Form(...)):
             result['config_path'] = 'database://wireguard_config'
             return result
     except Exception as e:
+        # The worker may be restarting while wg-quick changes the interface.
+        # Return the requested target explicitly so the client can keep the
+        # transition state until the next authoritative status update.
         return {
+            'ok': False,
             'enabled': False,
             'requested_enabled': enabled,
             'configured': configured,
             'config_exists': configured,
             'config_path': 'database://wireguard_config',
-            'status': 'connecting' if enabled else 'unavailable',
-            'status_detail': 'WireGuard transition is still in progress; worker status is temporarily unavailable.' if enabled else '',
+            'operation': 'connecting' if enabled else 'disconnecting',
+            'status': 'connecting' if enabled else 'disconnecting',
+            'status_detail': 'WireGuard transition is still in progress; waiting for worker status.' ,
             'error': str(e),
         }
 
