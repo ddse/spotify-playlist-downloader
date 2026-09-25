@@ -55,3 +55,41 @@ def test_youtube_player_clients_can_be_overridden(monkeypatch):
     monkeypatch.setattr(worker, "YOUTUBE_PLAYER_CLIENTS", ["default", "web_safari"])
 
     assert worker.YOUTUBE_PLAYER_CLIENTS == ["default", "web_safari"]
+
+
+def test_direct_link_metadata_uses_provider_title_and_updates_track(monkeypatch):
+    row = {
+        "source_type": "url",
+        "title_override": 0,
+        "title": "track-123",
+        "artists": "example.com",
+        "album": "YouTube",
+    }
+
+    class FakeCursor:
+        def __init__(self):
+            self.updated = None
+        def execute(self, sql, params):
+            self.updated = (sql, params)
+        def commit(self):
+            pass
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def extract_info(self, url, download=False):
+            assert url == "https://example.com/audio/track-123"
+            assert download is False
+            return {"title": "Real Song Title", "artist": "Real Artist", "album": "Real Album"}
+
+    c = FakeCursor()
+    monkeypatch.setattr(worker.yt_dlp, "YoutubeDL", FakeYDL)
+    title, artist, album = worker.resolve_direct_link_metadata(
+        row, c, "url:test", "https://example.com/audio/track-123"
+    )
+    assert (title, artist, album) == ("Real Song Title", "Real Artist", "Real Album")
+    assert c.updated[1] == ("Real Song Title", "Real Artist", "Real Album", "url:test")
