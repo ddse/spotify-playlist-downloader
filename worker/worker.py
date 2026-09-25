@@ -69,6 +69,7 @@ DB_PATH = os.getenv('DB_PATH', '/state/app.db')
 MUSIC_DIR = os.getenv('MUSIC_DIR', '/music')
 FMT = os.getenv('AUDIO_FORMAT', 'mp3')
 BITRATE = os.getenv('AUDIO_BITRATE', '320K')
+YOUTUBE_PLAYER_CLIENTS = [x.strip() for x in os.getenv('YOUTUBE_PLAYER_CLIENTS', 'default,web_embedded').split(',') if x.strip()]
 
 
 class DownloadDebugError(RuntimeError):
@@ -394,6 +395,15 @@ def download(row, c, track_id, download_started_at=0):
         'subtitleslangs': subtitle_lang.split(','),
         'embedchapters': not split_chapters,
         'ignoreerrors': False,
+        # YouTube is actively changing the default player clients. Keep the
+        # normal client first, but add web_embedded as a non-PO-token fallback
+        # for videos whose default client only exposes SABR/blocked formats.
+        'extractor_args': {
+            'youtube': {
+                'player_client': YOUTUBE_PLAYER_CLIENTS,
+            },
+        },
+        'js_runtimes': {'deno': '/usr/local/bin/deno'},
     }
 
     if download_type == 'audio':
