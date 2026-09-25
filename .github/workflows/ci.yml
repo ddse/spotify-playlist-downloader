@@ -6,6 +6,7 @@ name: CI
 # provider path isolation fixed
 # provider API routes restored
 # database import restored/CD
+# main branch validation trigger
 
 on:
   pull_request:
