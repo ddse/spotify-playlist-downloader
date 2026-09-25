@@ -61,3 +61,8 @@ def test_wireguard_toggle_keeps_transition_state_until_terminal_status():
     assert "operation:enabled?'connecting':'disconnecting'" in text
     assert "setTogglingWireguard(true)" in text
     assert "next.operation" in text
+
+
+def test_wireguard_toggle_unlocks_when_transition_operation_is_finished_even_if_status_is_connecting():
+    text = SETTINGS.read_text(encoding="utf-8")
+    assert "if(next.operation) setTogglingWireguard(true); else setTogglingWireguard(false);" in text
