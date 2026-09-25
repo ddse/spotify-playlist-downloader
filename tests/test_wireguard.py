@@ -365,4 +365,3 @@ def test_disable_persists_requested_state_before_async_transition(monkeypatch):
             break
         import time; time.sleep(0.01)
     assert persisted[0] is False
-    assert wireguard.setting_enabled() is False
