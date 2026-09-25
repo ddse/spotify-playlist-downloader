@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -116,14 +117,17 @@ class WireGuardManagerTests(unittest.TestCase):
         self.assertFalse(self.wireguard.setting_enabled())
 
     def test_set_enabled_persists_preference(self):
-        with patch.object(self.wireguard, "_persist_enabled") as persist,              patch.object(self.wireguard, "_run") as run,              patch.object(self.wireguard, "is_up", side_effect=[True, True]):
-                self.wireguard.set_enabled(True)
-                self.wireguard.set_enabled(False)
+        with patch.object(self.wireguard, "_persist_enabled") as persist, \
+             patch.object(self.wireguard, "_run") as run, \
+             patch.object(self.wireguard, "is_up", side_effect=[True, True]):
+            self.wireguard.set_enabled(True)
+            self.wireguard.set_enabled(False)
         persist.assert_any_call(True)
         persist.assert_any_call(False)
 
     def test_restore_persisted_state_starts_wireguard(self):
-        with patch.object(self.wireguard, "setting_enabled", return_value=True),              patch.object(self.wireguard, "set_enabled") as set_enabled:
+        with patch.object(self.wireguard, "setting_enabled", return_value=True), \
+             patch.object(self.wireguard, "set_enabled") as set_enabled:
             self.assertTrue(self.wireguard.restore_persisted_state())
             import time
             for _ in range(20):
@@ -145,14 +149,19 @@ class WireGuardManagerTests(unittest.TestCase):
         set_enabled.assert_not_called()
 
     def test_status_config_exists_when_live_interface_has_no_config_file(self):
-        with patch.object(self.wireguard, "is_up", return_value=True),              patch.object(self.wireguard.os.path, "isfile", return_value=False),              patch.object(self.wireguard, "_route_status", return_value=(False, [])),              patch.object(self.wireguard, "_handshake_status", return_value=(False, [])),              patch.object(self.wireguard, "_public_ip", return_value=""):
+        with patch.object(self.wireguard, "is_up", return_value=True), \
+             patch.object(self.wireguard.os.path, "isfile", return_value=False), \
+             patch.object(self.wireguard, "_route_status", return_value=(False, [])), \
+             patch.object(self.wireguard, "_handshake_status", return_value=(False, [])), \
+             patch.object(self.wireguard, "_public_ip", return_value=""):
             result = self.wireguard.status()
         self.assertTrue(result["enabled"])
         self.assertTrue(result["config_exists"])
         self.assertEqual(result["config_source"], "live_interface")
 
     def test_debug_status_handles_status_exception_without_undefined_variable(self):
-        with patch.object(self.wireguard, "status", side_effect=RuntimeError("boom")),              patch.object(self.wireguard, "is_up", return_value=True):
+        with patch.object(self.wireguard, "status", side_effect=RuntimeError("boom")), \
+             patch.object(self.wireguard, "is_up", return_value=True):
             result = self.wireguard.debug_status()
         self.assertEqual(result["status"], "error")
         self.assertTrue(result["config_exists"])
@@ -231,6 +240,7 @@ class WireGuardManagerTests(unittest.TestCase):
                 time.sleep(0.01)
         self.assertEqual(persisted[0], False)
         set_enabled.assert_called_once_with(False)
+
     def test_apply_enabled_async_rejects_duplicate_transition(self):
         self.wireguard._operation = "connecting"
         self.assertFalse(self.wireguard.apply_enabled_async(False))
@@ -408,7 +418,10 @@ class WireGuardManagerTests(unittest.TestCase):
     def test_status_uses_transition_target_while_disconnecting(self):
         self.wireguard._operation = "disconnecting"
         try:
-            with patch.object(self.wireguard, "is_up", return_value=True),                  patch.object(self.wireguard, "_route_status", return_value=(False, [])),                  patch.object(self.wireguard, "_handshake_status", return_value=(False, [])),                  patch.object(self.wireguard, "_public_ip", return_value=""):
+            with patch.object(self.wireguard, "is_up", return_value=True), \
+                 patch.object(self.wireguard, "_route_status", return_value=(False, [])), \
+                 patch.object(self.wireguard, "_handshake_status", return_value=(False, [])), \
+                 patch.object(self.wireguard, "_public_ip", return_value=""):
                 result = self.wireguard.status()
             self.assertFalse(result["requested_enabled"])
             self.assertEqual(result["operation"], "disconnecting")
@@ -417,7 +430,10 @@ class WireGuardManagerTests(unittest.TestCase):
             self.wireguard._operation = None
 
     def test_status_does_not_require_public_ip_for_connected_state(self):
-        with patch.object(self.wireguard, "is_up", return_value=True),              patch.object(self.wireguard, "_route_status", return_value=(True, ["default dev wg0 table 51820"])),              patch.object(self.wireguard, "_handshake_status", return_value=(True, [{"public_key": "peer", "age_seconds": 5}])),              patch.object(self.wireguard, "_public_ip", return_value=""):
+        with patch.object(self.wireguard, "is_up", return_value=True), \
+             patch.object(self.wireguard, "_route_status", return_value=(True, ["default dev wg0 table 51820"])), \
+             patch.object(self.wireguard, "_handshake_status", return_value=(True, [{"public_key": "peer", "age_seconds": 5}])), \
+             patch.object(self.wireguard, "_public_ip", return_value=""):
             result = self.wireguard.status()
         self.assertTrue(result["vpn_route"])
         self.assertEqual(result["status"], "connected")
