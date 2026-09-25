@@ -170,6 +170,11 @@ def apply_enabled_async(enabled: bool):
             return False
         _operation = target
         _operation_error = ""
+        # Persist the requested target before the background transition starts.
+        # This prevents startup-restore or another status reader from observing
+        # the previous enabled preference and bringing WireGuard back up while
+        # a user-initiated disable is still in progress.
+        _persist_enabled(enabled)
 
     def worker():
         global _operation, _operation_error
