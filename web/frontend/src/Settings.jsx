@@ -43,7 +43,7 @@ export default function Settings({onClose}) {
         const next=JSON.parse(e.data);
         setWireguard(x=>({...x,...next}));
         if(next.operation) setTogglingWireguard(true);
-        else if(next.status==='connected'||next.status==='disconnected'||next.status==='unavailable') setTogglingWireguard(false);
+        else setTogglingWireguard(false);
       }catch{}};
       ws.onclose=()=>{if(!stopped)retry=setTimeout(connect,1000)};
       ws.onerror=()=>{try{ws.close()}catch{}};
