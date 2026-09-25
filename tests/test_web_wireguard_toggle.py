@@ -12,12 +12,12 @@ def test_wireguard_toggle_waits_for_authoritative_transition_state():
     assert "!!wireguard?.operation" in button
     assert "wireguard?.operation==='connecting'" in button
     assert "wireguard?.operation==='disconnecting'" in button
-    assert "(!wireguard?.requested_enabled&&!wireguard?.configured)" in button
+    assert "(!wireguard?.enabled&&!wireguard?.configured)" in button
 
 
 def test_wireguard_toggle_preserves_requested_intent_after_async_response():
     text = SETTINGS.read_text(encoding="utf-8")
-    assert "setWireguard(x=>({...x,requested_enabled:enabled}))" in text
+    assert "setWireguard(x=>({...x,requested_enabled:enabled,operation:enabled?'connecting':'disconnecting',status:enabled?'connecting':'disconnecting'}))" in text
     assert "setWireguard(x=>({...x,...d,requested_enabled:enabled}))" in text
     assert "setWireguard(x=>({...x,requested_enabled:!enabled}))" in text
 
