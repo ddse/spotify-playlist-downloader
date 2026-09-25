@@ -429,6 +429,19 @@ class WireGuardManagerTests(unittest.TestCase):
         finally:
             self.wireguard._operation = None
 
+    def test_status_keeps_runtime_connected_state_separate_from_persisted_target(self):
+        with patch.object(self.wireguard, "is_up", return_value=True), \
+             patch.object(self.wireguard, "_route_status", return_value=(True, ["default dev wg0 table 51820"])), \
+             patch.object(self.wireguard, "_handshake_status", return_value=(True, [{"public_key": "peer", "age_seconds": 5}])), \
+             patch.object(self.wireguard, "_public_ip", return_value="203.0.113.10"), \
+             patch.object(self.wireguard, "setting_enabled", return_value=False):
+            result = self.wireguard.status()
+
+        self.assertTrue(result["enabled"])
+        self.assertTrue(result["vpn_route"])
+        self.assertEqual(result["status"], "connected")
+        self.assertFalse(result["requested_enabled"])
+
     def test_status_does_not_require_public_ip_for_connected_state(self):
         with patch.object(self.wireguard, "is_up", return_value=True), \
              patch.object(self.wireguard, "_route_status", return_value=(True, ["default dev wg0 table 51820"])), \
