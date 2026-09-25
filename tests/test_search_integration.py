@@ -1,5 +1,6 @@
 import asyncio
 import threading
+import time
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -229,3 +230,56 @@ def test_worker_route_rejects_unknown_path(worker_endpoint):
     response = request(f"{web_youtube.WORKER_ENDPOINT}/api/search/unknown", q="song")
     assert response.status_code == 404
     assert response.json() == {"error": "not found"}
+
+
+def test_search_integration_provider_timeout_returns_structured_error(worker_endpoint, monkeypatch):
+    def slow_provider(query, page, limit):
+        time.sleep(0.5)
+        return {"items": [], "page": page, "limit": limit, "has_more": False}
+
+    worker_search.PROVIDERS["youtube"] = slow_provider
+    monkeypatch.setattr(worker_search, "PROVIDER_TIMEOUT_SECONDS", 0.05)
+
+    started = time.monotonic()
+    response = request(
+        f"{web_youtube.WORKER_ENDPOINT}/api/search/youtube",
+        q="faded", page=1, limit=10, source="youtube", wireguard="0", debug="1",
+    )
+    elapsed = time.monotonic() - started
+
+    assert response.status_code == 500
+    assert elapsed < 0.3
+    payload = response.json()
+    assert payload["items"] == []
+    assert "search provider timed out" in payload["error"]
+    assert payload["debug"]["steps"][0]["step"] == "worker_error"
+
+
+def test_youtube_provider_configures_network_timeout_and_no_retries(monkeypatch):
+    import worker.providers.youtube as youtube_provider
+
+    captured = {}
+
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            captured.update(options)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def extract_info(self, query, download=False):
+            assert query == "ytsearch1:faded"
+            assert download is False
+            return {"entries": [{"id": "abc", "title": "Faded"}]}
+
+    monkeypatch.setattr(youtube_provider.yt_dlp, "YoutubeDL", FakeYoutubeDL)
+
+    result = youtube_provider.search("faded", page=1, limit=1)
+
+    assert result["items"][0]["id"] == "abc"
+    assert captured["socket_timeout"] == 10
+    assert captured["retries"] == 0
+    assert captured["extractor_retries"] == 0
