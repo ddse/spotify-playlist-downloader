@@ -105,7 +105,7 @@ def set_enabled(enabled: bool):
         else:
             if is_up():
                 try:
-                    _run("wg-quick", "down", INTERFACE)
+                    _run("wg-quick", "down", RUNTIME_CONFIG)
                 except subprocess.CalledProcessError:
                     # wg-quick down is not idempotent: the interface may have
                     # disappeared between is_up() and the down command. Treat
