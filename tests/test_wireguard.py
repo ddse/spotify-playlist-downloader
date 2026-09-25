@@ -158,6 +158,34 @@ class WireGuardManagerTests(unittest.TestCase):
         self.assertTrue(result["config_exists"])
         self.assertFalse(result["interface_up"])
 
+    def test_enable_persists_requested_state_before_async_transition(self):
+        persisted = []
+        with patch.object(self.wireguard, "_persist_enabled", side_effect=lambda enabled: persisted.append(enabled)), \
+             patch.object(self.wireguard, "set_enabled") as set_enabled:
+            self.assertTrue(self.wireguard.apply_enabled_async(True))
+            import time
+            for _ in range(100):
+                if self.wireguard._operation is None:
+                    break
+                time.sleep(0.01)
+        self.assertTrue(persisted)
+        self.assertEqual(persisted[0], True)
+        set_enabled.assert_called_once_with(True)
+
+    def test_enable_target_stays_enabled_during_transition(self):
+        persisted = []
+        with patch.object(self.wireguard, "_persist_enabled", side_effect=lambda enabled: persisted.append(enabled)), \
+             patch.object(self.wireguard, "set_enabled") as set_enabled:
+            self.assertTrue(self.wireguard.apply_enabled_async(True))
+            self.assertTrue(self.wireguard.setting_enabled())
+            import time
+            for _ in range(100):
+                if self.wireguard._operation is None:
+                    break
+                time.sleep(0.01)
+        self.assertEqual(persisted[0], True)
+        set_enabled.assert_called_once_with(True)
+
     def test_disable_persists_requested_state_before_async_transition(self):
         persisted = []
         with patch.object(self.wireguard, "_persist_enabled", side_effect=lambda enabled: persisted.append(enabled)), \
