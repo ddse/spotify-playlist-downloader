@@ -158,6 +158,33 @@ class WireGuardManagerTests(unittest.TestCase):
         self.assertTrue(result["config_exists"])
         self.assertFalse(result["interface_up"])
 
+    def test_disable_persists_requested_state_before_async_transition(self):
+        persisted = []
+        with patch.object(self.wireguard, "_persist_enabled", side_effect=lambda enabled: persisted.append(enabled)), \
+             patch.object(self.wireguard, "set_enabled") as set_enabled:
+            self.assertTrue(self.wireguard.apply_enabled_async(False))
+            import time
+            for _ in range(100):
+                if self.wireguard._operation is None:
+                    break
+                time.sleep(0.01)
+        self.assertTrue(persisted)
+        self.assertEqual(persisted[0], False)
+        set_enabled.assert_called_once_with(False)
+
+    def test_disable_target_stays_disabled_if_restore_checks_during_transition(self):
+        persisted = []
+        with patch.object(self.wireguard, "_persist_enabled", side_effect=lambda enabled: persisted.append(enabled)), \
+             patch.object(self.wireguard, "set_enabled") as set_enabled:
+            self.assertTrue(self.wireguard.apply_enabled_async(False))
+            self.assertFalse(self.wireguard.setting_enabled())
+            import time
+            for _ in range(100):
+                if self.wireguard._operation is None:
+                    break
+                time.sleep(0.01)
+        self.assertEqual(persisted[0], False)
+        set_enabled.assert_called_once_with(False)
     def test_apply_enabled_async_rejects_duplicate_transition(self):
         self.wireguard._operation = "connecting"
         self.assertFalse(self.wireguard.apply_enabled_async(False))
@@ -353,15 +380,3 @@ class WorkerApiHandlerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-def test_disable_persists_requested_state_before_async_transition(monkeypatch):
-    persisted = []
-    monkeypatch.setattr(wireguard, "_persist_enabled", lambda enabled: persisted.append(enabled))
-    monkeypatch.setattr(wireguard, "set_enabled", lambda enabled: None)
-    assert wireguard.apply_enabled_async(False) is True
-    for _ in range(100):
-        if wireguard._operation is None:
-            break
-        import time; time.sleep(0.01)
-    assert persisted[0] is False
