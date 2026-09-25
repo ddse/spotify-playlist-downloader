@@ -301,9 +301,9 @@ def download_zingmp3(row, c, track_id):
 
 
 def _safe_filename_component(value, fallback='Unknown Title'):
-    value = re.sub(r'[\\x00-\\x1f\\x7f]+', ' ', str(value or '')).strip()
+    value = re.sub(r'[\x00-\x1f\x7f]+', ' ', str(value or '')).strip()
     value = re.sub(r'[\\\\/:*?"<>|]+', '_', value)
-    value = re.sub(r'\\s+', ' ', value).strip(' .')
+    value = re.sub(r'\s+', ' ', value).strip(' .')
     return (value or fallback)[:200]
 
 
