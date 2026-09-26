@@ -154,10 +154,12 @@ def test_update_track_title_renames_completed_file(tmp_path, monkeypatch):
     assert tuple(row) == ("New Song _ Live", 1, str(renamed))
 
 
-def test_update_track_title_rejects_downloading_track(tmp_path, monkeypatch):
+def test_update_track_title_allows_downloading_track(tmp_path, monkeypatch):
     connect, client = _client(tmp_path, monkeypatch); _seed(connect, "downloading")
     r = client.post("/api/tracks/title", params={"track_id": TRACK_ID}, data={"title": "New title"})
-    assert r.status_code == 409
+    assert r.status_code == 200
+    c = connect(); row = c.execute("SELECT title,title_override,status,file_path FROM tracks WHERE spotify_id=?", (TRACK_ID,)).fetchone(); c.close()
+    assert tuple(row) == ("New title", 1, "downloading", "")
 
 
 def test_download_request_persists_title_override(tmp_path, monkeypatch):
@@ -207,3 +209,5 @@ def test_frontend_exposes_visible_edit_title_button_in_queue_and_completed():
     assert "t('Edit name')" in text
     assert "t('Edit song title')" in text
     assert 'function CompletedTitleEditor' in text
+    assert "disabled={x.status==='downloading'}" not in text
+    assert "track.status!=='downloading'" not in text
