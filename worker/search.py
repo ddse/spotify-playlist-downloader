@@ -1,4 +1,5 @@
 import json
+import queue
 import time
 import errno
 import os
@@ -112,10 +113,40 @@ class Handler(BaseHTTPRequestHandler):
                 return False
             raise
 
+    def _wireguard_events(self):
+        subscriber, snapshot = manager.subscribe_wireguard()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-transform")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+
+            if snapshot is not None:
+                body = json.dumps({"type": "wireguard", **snapshot}, ensure_ascii=False)
+                self.wfile.write(f"data: {body}\\n\\n".encode("utf-8"))
+                self.wfile.flush()
+
+            while True:
+                try:
+                    snapshot = subscriber.get(timeout=15)
+                    body = json.dumps({"type": "wireguard", **snapshot}, ensure_ascii=False)
+                    self.wfile.write(f"data: {body}\\n\\n".encode("utf-8"))
+                except queue.Empty:
+                    self.wfile.write(b": ping\\n\\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            return
+        finally:
+            manager.unsubscribe_wireguard(subscriber)
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/health":
             return self._json(200, {"ok": True, "service": "worker"})
+        if parsed.path == "/api/wireguard/events":
+            return self._wireguard_events()
         if parsed.path == "/api/wireguard":
             try:
                 return self._json(200, manager.status())
@@ -193,6 +224,7 @@ def serve():
     # Restore the persisted WireGuard preference whenever the worker/server starts.
     # The restore runs asynchronously and retries while the network/container becomes ready.
     manager.restore_persisted_state()
+    manager.start_monitor()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"[worker-api] listening on {HOST}:{PORT}", flush=True)
     server.serve_forever()
