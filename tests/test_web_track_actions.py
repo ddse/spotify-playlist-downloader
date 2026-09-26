@@ -203,15 +203,19 @@ def test_youtube_download_config_has_timeout_retry_and_chunk_resilience():
     assert "'retry_sleep_functions'" in text
 
 
-def test_frontend_exposes_new_user_onboarding_guide():
+def test_frontend_exposes_reusable_new_user_guide_dialog():
     source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
     text = source.read_text(encoding="utf-8")
     assert "function NewUserGuide" in text
-    assert "music-onboarding-dismissed" in text
+    assert 'role="dialog"' in text
+    assert 'aria-labelledby="quick-start-title"' in text
     assert "New here? Start in 3 steps" in text
     assert "Choose options" in text
     assert "Track progress" in text
-    assert "Tip: Use Settings to configure provider credentials or WireGuard when needed." in text
+    assert "onStartTour" in text
+    assert "setShowGuide(true)" in text
+    assert "Product tour" in text
+    assert "music-onboarding-dismissed" not in text
 
 def test_frontend_exposes_interactive_product_tour():
     source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
