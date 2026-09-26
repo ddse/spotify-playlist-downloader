@@ -608,6 +608,14 @@ def run_worker():
                         heartbeat(c, 'paused:' + track_id)
                         logger.info('download paused track=%s', track_id)
                     elif requested == 'cancelling':
+                        # Remove the media artifact if yt-dlp produced one before
+                        # the cancellation reached the hook.
+                        try:
+                            partial = resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
+                            if partial and Path(partial).is_file():
+                                Path(partial).unlink()
+                        except OSError:
+                            logger.warning('could not clean cancelled output track=%s', track_id)
                         c.execute("DELETE FROM tracks WHERE spotify_id=?", (track_id,))
                         heartbeat(c, 'cancelled:' + track_id)
                         logger.info('download cancelled track=%s', track_id)
