@@ -93,3 +93,85 @@ def test_direct_link_metadata_uses_provider_title_and_updates_track(monkeypatch)
     )
     assert (title, artist, album) == ("Real Song Title", "Real Artist", "Real Album")
     assert c.updated[1] == ("Real Song Title", "Real Artist", "Real Album", "url:test")
+
+
+
+def _video_row(download_format="any", download_quality="1080"):
+    return {
+        "source_url": "https://www.youtube.com/watch?v=eR_RNVgewSc",
+        "source_mode": "single",
+        "artists": "YouTube",
+        "album": "YouTube",
+        "title": "Video",
+        "download_folder": "",
+        "download_type": "video",
+        "source_type": "youtube",
+        "download_format": download_format,
+        "download_quality": download_quality,
+        "video_codec": "auto",
+        "thumbnail": 0,
+        "subtitle": 0,
+        "subtitle_lang": "ja,en",
+        "subtitle_mode": "prefer_manual",
+        "split_chapters": 0,
+    }
+
+
+def test_video_download_never_falls_back_to_audio_only_best_selector(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "MUSIC_DIR", str(tmp_path))
+
+    class FakeYDL:
+        captured = None
+
+        def __init__(self, opts):
+            self.opts = opts
+            FakeYDL.captured = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def download(self, urls):
+            return 0
+
+    with patch.object(worker.yt_dlp, "YoutubeDL", FakeYDL):
+        result = worker.download(_video_row(), None, "yt:video")
+
+    assert result is None
+    fmt = FakeYDL.captured["format"]
+    assert "bestvideo" in fmt
+    assert "+bestaudio" in fmt
+    assert "/best[" not in fmt
+    assert "/best" not in fmt.replace("/bestvideo", "")
+    assert FakeYDL.captured["merge_output_format"] == "mp4"
+
+
+def test_mp4_video_download_requires_mp4_video_stream(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "MUSIC_DIR", str(tmp_path))
+
+    class FakeYDL:
+        captured = None
+
+        def __init__(self, opts):
+            self.opts = opts
+            FakeYDL.captured = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def download(self, urls):
+            return 0
+
+    with patch.object(worker.yt_dlp, "YoutubeDL", FakeYDL):
+        worker.download(_video_row("mp4", "1080"), None, "yt:video-mp4")
+
+    fmt = FakeYDL.captured["format"]
+    assert "bestvideo[ext=mp4][height<=1080]" in fmt
+    assert "bestaudio[ext=m4a]" in fmt
+    assert "best[" not in fmt
+    assert "bestvideo" in fmt
