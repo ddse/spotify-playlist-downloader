@@ -82,6 +82,28 @@ def test_queue_actions_accept_encoded_track_id_as_query_parameter(tmp_path, monk
     assert tuple(row) == ("queued", 1, 1)
 
 
+def test_downloading_queue_controllers_pause_prioritize_and_cancel(tmp_path, monkeypatch):
+    connect, client = _client(tmp_path, monkeypatch); _seed(connect, "downloading")
+    assert client.post("/api/queue/prioritize", params={"track_id": TRACK_ID}).json() == {"ok": True}
+    assert client.post("/api/queue/pause", params={"track_id": TRACK_ID}).json() == {"ok": True}
+    c = connect(); row = c.execute("SELECT status,auto_start,priority FROM tracks WHERE spotify_id=?", (TRACK_ID,)).fetchone(); c.close()
+    assert tuple(row) == ("pausing", 0, 1)
+
+    # Cancel a second active job without deleting the row underneath the worker.
+    connect2, client2 = _client(tmp_path, monkeypatch)
+    _seed(connect2, "downloading")
+    assert client2.post("/api/queue/cancel", params={"track_id": TRACK_ID}).json() == {"ok": True}
+    c = connect2(); row = c.execute("SELECT status,auto_start FROM tracks WHERE spotify_id=?", (TRACK_ID,)).fetchone(); c.close()
+    assert tuple(row) == ("cancelling", 0)
+
+
+def test_queue_cancel_removes_non_active_job(tmp_path, monkeypatch):
+    connect, client = _client(tmp_path, monkeypatch); _seed(connect, "queued")
+    assert client.post("/api/queue/cancel", params={"track_id": TRACK_ID}).json() == {"ok": True}
+    c = connect(); row = c.execute("SELECT * FROM tracks WHERE spotify_id=?", (TRACK_ID,)).fetchone(); c.close()
+    assert row is None
+
+
 def test_delete_queued_track_accepts_encoded_track_id(tmp_path, monkeypatch):
     connect, client = _client(tmp_path, monkeypatch); _seed(connect, "queued")
     r = client.delete("/api/queue", params={"track_id": TRACK_ID})
@@ -194,5 +216,8 @@ def test_frontend_exposes_visible_edit_title_button_in_queue_and_completed():
     source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
     text = source.read_text(encoding="utf-8")
     assert 'Sửa tên' in text
-    assert 'title="Sửa tên bài hát"' in text
+    assert 'disabled={x.status===\'downloading\'}' in text
+    assert 'Không thể sửa khi đang tải' in text
+    assert '/api/queue/cancel?track_id=' in text
+    assert '/api/queue/prioritize?track_id=' in text
     assert 'function CompletedTitleEditor' in text
