@@ -40,7 +40,7 @@ The custom application owns the web UI, YouTube search, download queue, worker, 
 - Progress polling
 - Retry failed downloads
 - Download history
-- Playlist scheduler
+- Playlist scheduler with a global on/off setting
 - Worker and scheduler heartbeats
 - Healthchecks for the three application containers
 - No Docker socket access
@@ -128,6 +128,15 @@ The real `wireguard/wg0.conf` is ignored by Git. The worker needs `NET_ADMIN` (a
 
 When the setting is changed while a download is running, the toggle waits for that download to finish before changing the route, preventing a route switch in the middle of a download.
 
+
+### Subscription scheduler
+
+The Settings dialog contains **Schedule** with a global on/off switch for automatic subscription synchronization.
+
+- **On**: the scheduler periodically synchronizes enabled Spotify subscriptions.
+- **Off**: the scheduler does not perform any background subscription synchronization.
+- Manual **Check now** actions remain available when the global schedule is off.
+- Individual subscription enable/disable remains independent from the global scheduler switch.
 
 ### Real provider and WireGuard integration tests
 
