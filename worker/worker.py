@@ -78,11 +78,6 @@ class DownloadDebugError(RuntimeError):
         self.logs = logs
 
 
-class QueueControlError(RuntimeError):
-    """Raised by yt-dlp hooks when the web controller changes the job state."""
-    pass
-
-
 def conn():
     from database import db
     return db()
@@ -378,17 +373,6 @@ def download(row, c, track_id, download_started_at=0):
         now = time.time()
         status = data.get('status')
 
-        # The web process changes the row state from another SQLite connection.
-        # Raising from the yt-dlp hook is the safe way to interrupt an active
-        # download without killing the worker process itself.
-        if status in {'downloading', 'finished'}:
-            control = c.execute(
-                "SELECT status FROM tracks WHERE spotify_id=?",
-                (track_id,),
-            ).fetchone()
-            if control and control['status'] in {'pausing', 'cancelling'}:
-                raise QueueControlError(control['status'])
-
         if status == 'downloading':
             total = data.get('total_bytes') or data.get('total_bytes_estimate')
             downloaded = data.get('downloaded_bytes', 0)
@@ -504,16 +488,6 @@ def download(row, c, track_id, download_started_at=0):
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             result = ydl.download([url])
-
-        if c is not None:
-            control = c.execute(
-                "SELECT status FROM tracks WHERE spotify_id=?",
-                (track_id,),
-            ).fetchone()
-            if control and control['status'] in {'pausing', 'cancelling'}:
-                raise QueueControlError(control['status'])
-    except QueueControlError:
-        raise
     except Exception as exc:
         raise DownloadDebugError(
             f'{type(exc).__name__}: {exc}',
@@ -595,33 +569,6 @@ def run_worker():
                         "UPDATE tracks SET status='completed',progress=100,error=NULL,file_path=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
                         (file_path, track_id),
                     )
-                except QueueControlError as e:
-                    control = c.execute(
-                        "SELECT status FROM tracks WHERE spotify_id=?",
-                        (track_id,),
-                    ).fetchone()
-                    requested = control['status'] if control else str(e)
-                    if requested == 'pausing':
-                        c.execute(
-                            "UPDATE tracks SET status='paused',progress=0,download_speed='',eta='',error=NULL,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
-                            (track_id,),
-                        )
-                        heartbeat(c, 'paused:' + track_id)
-                        logger.info('download paused track=%s', track_id)
-                    elif requested == 'cancelling':
-                        # Remove the media artifact if yt-dlp produced one before
-                        # the cancellation reached the hook.
-                        try:
-                            partial = resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
-                            if partial and Path(partial).is_file():
-                                Path(partial).unlink()
-                        except OSError:
-                            logger.warning('could not clean cancelled output track=%s', track_id)
-                        c.execute("DELETE FROM tracks WHERE spotify_id=?", (track_id,))
-                        heartbeat(c, 'cancelled:' + track_id)
-                        logger.info('download cancelled track=%s', track_id)
-                    else:
-                        logger.warning('download control state disappeared track=%s state=%s', track_id, requested)
                 except Exception as e:
                     logger.exception('download job failed track=%s', track_id)
                     err = format_error(e, getattr(e, 'logs', ''))

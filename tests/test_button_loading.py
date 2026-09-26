@@ -18,7 +18,7 @@ class ButtonLoadingTests(unittest.TestCase):
         self.assertIn("setTimeout(()=>setInternalLoading(false),remaining)", text)
         self.assertIn("loading={sending}", text)
         self.assertIn("loading={busy}", text)
-        self.assertIn("<span>Loading...</span>", text)
+        self.assertIn("t('Loading...')", text)
 
 
 if __name__ == "__main__":

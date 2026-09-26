@@ -770,51 +770,11 @@ def start_queue(track_id:str=Query(...)):
 
 @app.post('/api/queue/pause')
 def pause_queue(track_id:str=Query(...)):
-    c=db()
-    cur=c.execute(
-        "UPDATE tracks SET auto_start=0,status=CASE WHEN status='downloading' THEN 'pausing' ELSE 'paused' END,updated_at=CURRENT_TIMESTAMP "
-        "WHERE spotify_id=? AND status IN ('queued','downloading')",
-        (track_id,),
-    )
-    c.commit()
-    c.close()
-    return {'ok':cur.rowcount>0}
+    c=db(); cur=c.execute("UPDATE tracks SET auto_start=0,status='paused',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status='queued'",(track_id,)); c.commit(); c.close(); return {'ok':cur.rowcount>0}
 
 @app.post('/api/queue/prioritize')
 def prioritize_queue(track_id:str=Query(...)):
-    c=db()
-    cur=c.execute(
-        "UPDATE tracks SET priority=priority+1,updated_at=CURRENT_TIMESTAMP "
-        "WHERE spotify_id=? AND status IN ('queued','paused','downloading')",
-        (track_id,),
-    )
-    c.commit()
-    c.close()
-    return {'ok':cur.rowcount>0}
-
-@app.post('/api/queue/cancel')
-def cancel_queue(track_id:str=Query(...)):
-    c=db()
-    row=c.execute("SELECT status FROM tracks WHERE spotify_id=?", (track_id,)).fetchone()
-    if not row:
-        c.close()
-        return {'ok':False}
-    status=row['status']
-    if status == 'downloading':
-        c.execute(
-            "UPDATE tracks SET status='cancelling',auto_start=0,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
-            (track_id,),
-        )
-        c.commit()
-        c.close()
-        return {'ok':True}
-    cur=c.execute(
-        "DELETE FROM tracks WHERE spotify_id=? AND status IN ('queued','paused','pending_source','failed','pausing')",
-        (track_id,),
-    )
-    c.commit()
-    c.close()
-    return {'ok':cur.rowcount>0}
+    c=db(); c.execute("UPDATE tracks SET priority=priority+1,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status IN ('queued','paused')",(track_id,)); c.commit(); c.close(); return {'ok':True}
 
 @app.post('/api/import/youtube')
 def import_youtube(source_url:str=Form(...),source_mode:str=Form('playlist'),download_type:str=Form('audio'),download_format:str=Form('mp3'),download_quality:str=Form('320'),download_folder:str=Form('YouTube'),playlist_item_limit:str=Form('0')):
@@ -828,30 +788,11 @@ def queue_bulk(action:str=Form(...),ids:str=Form('')):
     selected=[x for x in ids.split(',') if x]
     c=db()
     if action == 'clear_selected' and selected:
-        # Never delete an active worker row underneath yt-dlp. Mark it for
-        # cancellation so the worker can interrupt the download safely.
-        c.executemany(
-            "UPDATE tracks SET status='cancelling',auto_start=0,updated_at=CURRENT_TIMESTAMP "
-            "WHERE spotify_id=? AND status='downloading'",
-            ((x,) for x in selected),
-        )
-        c.executemany(
-            "DELETE FROM tracks WHERE spotify_id=? AND status IN ('queued','paused','pending_source','failed','pausing')",
-            ((x,) for x in selected),
-        )
+        c.executemany("DELETE FROM tracks WHERE spotify_id=?",( (x,) for x in selected ))
     elif action == 'remove_selected' and selected:
-        # Active jobs must be cancelled by the worker before their DB row is
-        # removed; completed/queued rows can still be removed immediately.
-        c.executemany(
-            "UPDATE tracks SET status='cancelling',auto_start=0,updated_at=CURRENT_TIMESTAMP "
-            "WHERE spotify_id=? AND status='downloading'",
-            ((x,) for x in selected),
-        )
         rows=c.execute("SELECT spotify_id,file_path,status FROM tracks WHERE spotify_id=?".replace("spotify_id=?","spotify_id IN (%s)" % ",".join("?"*len(selected))), tuple(selected)).fetchall()
         music=Path(os.getenv('MUSIC_DIR','/music')).resolve()
         for row in rows:
-            if row['status'] == 'cancelling':
-                continue
             path_value=(row['file_path'] or '').strip()
             if path_value:
                 try:
@@ -860,7 +801,7 @@ def queue_bulk(action:str=Form(...),ids:str=Form('')):
                         p.unlink()
                 except OSError:
                     pass
-        c.executemany("DELETE FROM tracks WHERE spotify_id=? AND status!='cancelling'",( (x,) for x in selected ))
+        c.executemany("DELETE FROM tracks WHERE spotify_id=?",( (x,) for x in selected ))
     elif action == 'clear_completed':
         c.execute("DELETE FROM tracks WHERE status='completed'")
     elif action == 'clear_failed':
