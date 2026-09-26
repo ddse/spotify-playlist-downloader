@@ -190,6 +190,17 @@ def test_frontend_supports_title_override_and_direct_link_metadata_ui():
     assert 'function QueueRow' in text
 
 
+def test_youtube_download_config_has_timeout_retry_and_chunk_resilience():
+    source = Path(__file__).resolve().parents[1] / "worker" / "worker.py"
+    text = source.read_text(encoding="utf-8")
+    assert "'socket_timeout': 60" in text
+    assert "'retries': 10" in text
+    assert "'fragment_retries': 10" in text
+    assert "'file_access_retries': 3" in text
+    assert "'http_chunk_size': 10 * 1024 * 1024" in text
+    assert "'retry_sleep_functions'" in text
+
+
 def test_frontend_exposes_visible_edit_title_button_in_queue_and_completed():
     source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
     text = source.read_text(encoding="utf-8")
