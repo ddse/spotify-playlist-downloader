@@ -468,19 +468,21 @@ def download(row, c, track_id, download_started_at=0):
         quality = download_quality if download_quality in {'best','2160','1440','1080','720','480','360'} else 'best'
         height = '' if quality == 'best' else f'[height<={quality}]'
 
-        # Keep the selector permissive and let yt-dlp choose formats actually
-        # exposed by the current YouTube player client. Strict ext/codec filters
-        # can produce "Requested format is not available" even when usable
-        # formats exist.
+        # Video downloads must always require a video stream. Never fall back
+        # to the generic "best" selector because YouTube may expose an
+        # audio-only MP4 as the best single format. The final file must contain
+        # a video stream, with audio added when available.
         if download_format == 'ios':
             vsel = f"bestvideo[vcodec~='^(avc|h264)']{height}"
-            fallback_vsel = f"bestvideo{height}"
-            opts['format'] = f'{vsel}+bestaudio/{fallback_vsel}+bestaudio/best{height}'
+            fallback_vsel = f'bestvideo{height}'
+            opts['format'] = f'{vsel}+bestaudio/{fallback_vsel}+bestaudio/{fallback_vsel}'
         elif download_format == 'mp4':
             vsel = f'bestvideo[ext=mp4]{height}'
-            opts['format'] = f'{vsel}+bestaudio[ext=m4a]/{vsel}+bestaudio/bestvideo{height}+bestaudio/best{height}'
+            fallback_vsel = f'bestvideo{height}'
+            opts['format'] = f'{vsel}+bestaudio[ext=m4a]/{vsel}+bestaudio/{fallback_vsel}+bestaudio/{fallback_vsel}'
         else:
-            opts['format'] = f'bestvideo{height}+bestaudio/best{height}'
+            vsel = f'bestvideo{height}'
+            opts['format'] = f'{vsel}+bestaudio/{vsel}'
         opts['merge_output_format'] = 'mp4'
 
     try:
