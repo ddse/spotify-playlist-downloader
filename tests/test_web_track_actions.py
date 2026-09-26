@@ -194,5 +194,6 @@ def test_frontend_exposes_visible_edit_title_button_in_queue_and_completed():
     source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
     text = source.read_text(encoding="utf-8")
     assert 'Sửa tên' in text
-    assert 'title="Sửa tên bài hát"' in text
+    assert 'title={x.status===\'downloading\'?\'Không thể sửa khi đang tải\':\'Sửa tên bài hát\'}' in text
+    assert 'disabled={x.status===\'downloading\'}' in text
     assert 'function CompletedTitleEditor' in text
