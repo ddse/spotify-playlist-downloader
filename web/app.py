@@ -772,16 +772,10 @@ def start_queue(track_id:str=Query(...)):
 def pause_queue(track_id:str=Query(...)):
     c=db()
     cur=c.execute(
-        "UPDATE tracks SET auto_start=0,status='pausing',updated_at=CURRENT_TIMESTAMP "
+        "UPDATE tracks SET auto_start=0,status=CASE WHEN status='downloading' THEN 'pausing' ELSE 'paused' END,updated_at=CURRENT_TIMESTAMP "
         "WHERE spotify_id=? AND status IN ('queued','downloading')",
         (track_id,),
     )
-    if cur.rowcount and cur.rowcount > 0:
-        row=c.execute("SELECT status FROM tracks WHERE spotify_id=?", (track_id,)).fetchone()
-        # Queued jobs can be paused immediately; active downloads are interrupted
-        # by the worker progress hook and then become paused.
-        if row and row['status'] == 'pausing':
-            pass
     c.commit()
     c.close()
     return {'ok':cur.rowcount>0}
