@@ -3,6 +3,7 @@ import {useCallback,useEffect,useState} from 'react';
 const translations = {
   vi: {
     'Loading...':'Đang tải...',
+    'Edit name':'Sửa tên','Edit song title':'Sửa tên bài hát','Cannot edit while downloading':'Không thể sửa khi đang tải','Close player':'Đóng trình phát','Close settings':'Đóng cài đặt','Debug':'Gỡ lỗi','ON':'BẬT','OFF':'TẮT','Search':'Tìm kiếm','Download link':'Tải từ liên kết','Prev':'Trước','Page':'Trang','never':'chưa bao giờ','Saved':'Đã lưu','Missing':'Thiếu','WireGuard connecting...':'WireGuard đang kết nối...','WireGuard disconnecting...':'WireGuard đang ngắt kết nối...','Saving...':'Đang lưu...','Testing...':'Đang kiểm tra...','Client ID':'Client ID','Client Secret':'Client Secret','Redirect URI':'Redirect URI','Cookies':'Cookie','Proxy':'Proxy','Developer Token':'Developer Token',
     'Download options':'Tùy chọn tải xuống',
     'Song title':'Tên bài hát',
     'Type':'Loại',
