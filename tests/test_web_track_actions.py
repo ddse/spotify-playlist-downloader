@@ -193,6 +193,6 @@ def test_frontend_supports_title_override_and_direct_link_metadata_ui():
 def test_frontend_exposes_visible_edit_title_button_in_queue_and_completed():
     source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
     text = source.read_text(encoding="utf-8")
-    assert 'Sửa tên' in text
-    assert 'title="Sửa tên bài hát"' in text
+    assert "t('Edit name')" in text
+    assert "t('Edit song title')" in text
     assert 'function CompletedTitleEditor' in text
