@@ -265,3 +265,43 @@ def test_youtube_video_download_requests_video_plus_audio_and_mp4(tmp_path, monk
     assert not any(
         pp.get("key") == "FFmpegExtractAudio" for pp in opts.get("postprocessors", [])
     )
+
+def test_edited_title_is_applied_to_filename_after_download(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "MUSIC_DIR", str(tmp_path))
+    media = tmp_path / "Artist" / "Album" / "Original Title.mp3"
+    media.parent.mkdir(parents=True)
+    media.write_bytes(b"fake media")
+
+    import sqlite3
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.execute("CREATE TABLE tracks (spotify_id TEXT PRIMARY KEY, title TEXT)")
+    c.execute("INSERT INTO tracks(spotify_id,title) VALUES(?,?)", ("yt:test", "Edited Title"))
+    c.commit()
+
+    result = worker.rename_download_to_current_title(c, "yt:test", str(media))
+
+    assert result == str(media.parent / "Edited Title.mp3")
+    assert (media.parent / "Edited Title.mp3").read_bytes() == b"fake media"
+    assert not media.exists()
+
+
+def test_edited_title_does_not_overwrite_existing_filename(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "MUSIC_DIR", str(tmp_path))
+    media = tmp_path / "Original.mp3"
+    target = tmp_path / "Edited.mp3"
+    media.write_bytes(b"original")
+    target.write_bytes(b"existing")
+
+    import sqlite3
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.execute("CREATE TABLE tracks (spotify_id TEXT PRIMARY KEY, title TEXT)")
+    c.execute("INSERT INTO tracks(spotify_id,title) VALUES(?,?)", ("yt:test", "Edited"))
+    c.commit()
+
+    result = worker.rename_download_to_current_title(c, "yt:test", str(media))
+
+    assert result == str(media)
+    assert media.read_bytes() == b"original"
+    assert target.read_bytes() == b"existing"
