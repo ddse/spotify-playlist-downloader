@@ -215,6 +215,8 @@ def test_frontend_exposes_reusable_new_user_guide_dialog():
     assert "onStartTour" in text
     assert "setShowGuide(true)" in text
     assert "Product tour" in text
+    assert "tour-completed" in text
+    assert "Completed downloads" in text
     assert "music-onboarding-dismissed" not in text
 
 def test_frontend_exposes_interactive_product_tour():
