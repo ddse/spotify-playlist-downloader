@@ -66,6 +66,8 @@ class WireGuardManagerTests(unittest.TestCase):
         self.old_config = wireguard.CONFIG
         wireguard.CONFIG = str(self.config)
         wireguard._state = False
+        wireguard._public_ip_cache = ""
+        wireguard._public_ip_cache_at = 0.0
 
     def tearDown(self):
         self.wireguard.CONFIG = self.old_config
@@ -349,6 +351,27 @@ class WireGuardManagerTests(unittest.TestCase):
         self.assertFalse(active)
         self.assertEqual(routes, [])
 
+    def test_runtime_state_comes_from_wg_show(self):
+        with patch.object(self.wireguard, "_wg_show", return_value=type(
+            "Result", (), {"stdout": "peer 1.2.3.4:51820\\n"}
+        )()), patch.object(self.wireguard, "_route_status", return_value=(True, ["default dev wg0"])), \
+             patch.object(self.wireguard, "_handshake_status", return_value=(True, [{"public_key": "peer", "age_seconds": 5}])), \
+             patch.object(self.wireguard, "_public_ip", return_value="203.0.113.20"):
+            result = self.wireguard.status()
+        self.assertTrue(result["enabled"])
+        self.assertEqual(result["status"], "connected")
+        self.assertEqual(result["public_ip"], "203.0.113.20")
+
+    def test_public_ip_is_not_requested_while_connecting(self):
+        with patch.object(self.wireguard, "is_up", return_value=True), \
+             patch.object(self.wireguard, "_route_status", return_value=(True, ["default dev wg0"])), \
+             patch.object(self.wireguard, "_handshake_status", return_value=(False, [{"public_key": "peer", "age_seconds": None}])), \
+             patch.object(self.wireguard, "_public_ip") as public_ip:
+            result = self.wireguard.status()
+        self.assertEqual(result["status"], "connecting")
+        self.assertEqual(result["public_ip"], "")
+        public_ip.assert_not_called()
+
     def test_status_reports_active_vpn_when_route_handshake_and_public_ip_are_valid(self):
         with patch.object(self.wireguard, "is_up", return_value=True), patch.object(
             self.wireguard,
@@ -450,6 +473,47 @@ class WireGuardManagerTests(unittest.TestCase):
             result = self.wireguard.status()
         self.assertTrue(result["vpn_route"])
         self.assertEqual(result["status"], "connected")
+
+    def test_wireguard_subscriber_receives_only_changed_snapshots(self):
+        self.wireguard._last_snapshot = None
+        self.wireguard._last_fingerprint = None
+        subscriber, initial = self.wireguard.subscribe_wireguard()
+        try:
+            self.assertIsNone(initial)
+            snapshot = {"status": "connected", "enabled": True}
+            self.assertTrue(self.wireguard._publish_snapshot(snapshot))
+            self.assertFalse(self.wireguard._publish_snapshot(snapshot))
+            self.assertEqual(subscriber.get(timeout=0.2), snapshot)
+        finally:
+            self.wireguard.unsubscribe_wireguard(subscriber)
+
+    def test_monitor_uses_non_blocking_public_ip_mode(self):
+        snapshots = []
+        original_publish = self.wireguard._publish_snapshot
+        original_stop = self.wireguard._monitor_stop
+        try:
+            self.wireguard._monitor_stop = __import__("threading").Event()
+            self.wireguard._monitor_stop.set()
+            with patch.object(
+                self.wireguard,
+                "status",
+                return_value={"status": "connected", "enabled": True, "public_ip": ""},
+            ) as status:
+                with patch.object(self.wireguard, "_ensure_public_ip_refresh") as refresh, \
+                     patch.object(self.wireguard, "_publish_snapshot", side_effect=snapshots.append):
+                    self.wireguard._monitor_stop.clear()
+                    worker = __import__("threading").Thread(target=self.wireguard._monitor_loop, daemon=True)
+                    worker.start()
+                    import time
+                    time.sleep(0.02)
+                    self.wireguard._monitor_stop.set()
+                    worker.join(1)
+                status.assert_called()
+                self.assertEqual(status.call_args.kwargs, {"resolve_public_ip": False})
+                refresh.assert_called()
+        finally:
+            self.wireguard._monitor_stop = original_stop
+            self.wireguard._publish_snapshot = original_publish
 
     def test_status_reports_disconnected_when_interface_is_down(self):
         with patch.object(self.wireguard, "is_up", return_value=False):

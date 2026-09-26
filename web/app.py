@@ -20,11 +20,18 @@ DB_PATH=os.getenv('DB_PATH','/state/app.db'); SYNC_TOKEN=os.getenv('SYNC_TOKEN',
 WIREGUARD_ENV_DEFAULT=os.getenv('WIREGUARD_DEFAULT','0') in {'1','true','yes','on'}
 
 async def wireguard_enabled():
+    state = getattr(app.state, "wireguard_state", None)
+    if state is not None:
+        return bool(state.get("enabled"))
     try:
         async with httpx.AsyncClient(timeout=3) as client:
-            response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
+            response = await client.get(
+                f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard"
+            )
             response.raise_for_status()
-            return bool(response.json().get('enabled'))
+            state = response.json()
+            app.state.wireguard_state = state
+            return bool(state.get("enabled"))
     except Exception:
         return False
 
@@ -78,45 +85,103 @@ def worker_state(c, service):
 @app.on_event('startup')
 async def startup():
     db().close()
-    async def broadcaster():
+    app.state.wireguard_state = None
+    app.state.wireguard_bridge_task = None
+
+    async def load_initial_state():
+        try:
+            async with httpx.AsyncClient(timeout=3) as client:
+                response = await client.get(
+                    f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard"
+                )
+                response.raise_for_status()
+                payload = response.json()
+                payload = {
+                    'type': 'wireguard',
+                    **payload,
+                    'requested_enabled': bool(
+                        payload.get('requested_enabled', payload.get('enabled'))
+                    ),
+                }
+                app.state.wireguard_state = payload
+                app.state.wireguard_last = json.dumps(payload, sort_keys=True)
+                return payload
+        except Exception as exc:
+            logger.warning("initial WireGuard state unavailable: %s", exc)
+            return None
+
+    async def broadcast(payload):
+        app.state.wireguard_state = payload
+        app.state.wireguard_last = json.dumps(payload, sort_keys=True)
+        for ws in list(app.state.wireguard_clients):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                app.state.wireguard_clients.discard(ws)
+
+    async def bridge():
+        worker_url = f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard/events"
         while True:
             try:
-                async with httpx.AsyncClient(timeout=3) as client:
-                    response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
-                    response.raise_for_status(); wg=response.json()
-                payload={'type':'wireguard',**wg,'requested_enabled':bool(wg.get('requested_enabled', wg.get('enabled')))}
-                fingerprint=json.dumps(payload,sort_keys=True)
-                if fingerprint != app.state.wireguard_last:
-                    app.state.wireguard_last=fingerprint
-                    for ws in list(app.state.wireguard_clients):
-                        try: await ws.send_json(payload)
-                        except Exception: app.state.wireguard_clients.discard(ws)
-            except Exception:
-                payload={'type':'wireguard','enabled':False,'requested_enabled':False,'status':'unavailable','status_detail':'WireGuard worker status unavailable'}
-                fingerprint=json.dumps(payload,sort_keys=True)
-                if fingerprint != app.state.wireguard_last:
-                    app.state.wireguard_last=fingerprint
-                    for ws in list(app.state.wireguard_clients):
-                        try: await ws.send_json(payload)
-                        except Exception: app.state.wireguard_clients.discard(ws)
-            await asyncio.sleep(1)
-    asyncio.create_task(broadcaster())
+                timeout = httpx.Timeout(connect=3, read=None, write=3, pool=3)
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    async with client.stream("GET", worker_url) as response:
+                        response.raise_for_status()
+                        data_lines = []
+                        async for line in response.aiter_lines():
+                            if line.startswith("data: "):
+                                data_lines.append(line[6:])
+                                continue
+                            if not line and data_lines:
+                                try:
+                                    payload = json.loads("".join(data_lines))
+                                    if payload.get("type") == "wireguard":
+                                        await broadcast(payload)
+                                except json.JSONDecodeError:
+                                    logger.warning("Invalid WireGuard SSE payload")
+                                data_lines = []
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("WireGuard SSE bridge disconnected: %s", exc)
+                await asyncio.sleep(1)
+
+    await load_initial_state()
+    app.state.wireguard_bridge_task = asyncio.create_task(bridge())
+
+
+@app.on_event('shutdown')
+async def shutdown():
+    task = getattr(app.state, "wireguard_bridge_task", None)
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
 
 @app.websocket('/ws/wireguard')
 async def wireguard_socket(websocket: WebSocket):
     await websocket.accept()
     app.state.wireguard_clients.add(websocket)
     try:
-        async with httpx.AsyncClient(timeout=3) as client:
-            response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
-            response.raise_for_status(); wg=response.json()
-        await websocket.send_json({'type':'wireguard',**wg,'requested_enabled':bool(wg.get('requested_enabled', wg.get('enabled')))})
-        while True: await websocket.receive_text()
+        payload = app.state.wireguard_state
+        if payload is None:
+            payload = {
+                'type': 'wireguard',
+                'enabled': False,
+                'requested_enabled': False,
+                'status': 'unavailable',
+                'status_detail': 'WireGuard worker status unavailable',
+            }
+        await websocket.send_json(payload)
+        while True:
+            await websocket.receive_text()
     except WebSocketDisconnect:
         app.state.wireguard_clients.discard(websocket)
     except Exception:
         app.state.wireguard_clients.discard(websocket)
-
 
 
 @app.get('/',response_class=HTMLResponse)
@@ -353,40 +418,23 @@ async def test_provider_connection(provider:str):
 @app.get('/api/services')
 async def services():
     c=db(); result={k:worker_state(c,k) for k in ('worker','scheduler')}; c.close()
-    result['wireguard']={
-        'enabled': await wireguard_enabled(),
-        'interface': os.getenv('WG_INTERFACE','wg0'),
-        'config_path': os.getenv('WG_CONFIG','/etc/wireguard/wg0.conf'),
-        'config_exists': False,
-        'status': 'unknown',
+    wg = app.state.wireguard_state or {}
+    result['wireguard'] = {
+        'enabled': bool(wg.get('enabled')),
+        'requested_enabled': bool(wg.get('requested_enabled', wg.get('enabled'))),
+        'interface': wg.get('interface', os.getenv('WG_INTERFACE','wg0')),
+        'config_path': wg.get('config_path', 'database://wireguard_config'),
+        'config_exists': bool(wg.get('config_exists')),
+        'status': wg.get('status', 'unavailable'),
+        'vpn_route': bool(wg.get('vpn_route')),
+        'route_active': bool(wg.get('route_active')),
+        'handshake_recent': bool(wg.get('handshake_recent')),
+        'public_ip': wg.get('public_ip', ''),
+        'receive_bytes': int(wg.get('receive_bytes', 0)),
+        'send_bytes': int(wg.get('send_bytes', 0)),
+        'peer_count': int(wg.get('peer_count', 0)),
+        'status_detail': wg.get('status_detail', ''),
     }
-    try:
-        async with httpx.AsyncClient(timeout=3) as client:
-            response=await client.get(f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/wireguard")
-            response.raise_for_status()
-            wg=response.json()
-            result['wireguard']={
-                'enabled':bool(wg.get('enabled')),
-                'interface':wg.get('interface','wg0'),
-                'config_path':wg.get('config_path',os.getenv('WG_CONFIG','/etc/wireguard/wg0.conf')),
-                'config_exists':bool(wg.get('config_exists')),
-                'status':wg.get('status') or ('connected' if wg.get('vpn_route') else ('connecting' if await wireguard_enabled() else 'disconnected')),
-                'vpn_route':bool(wg.get('vpn_route')),
-                'route_active':bool(wg.get('route_active')),
-                'handshake_recent':bool(wg.get('handshake_recent')),
-                'public_ip':wg.get('public_ip',''),
-                'receive_bytes':int(wg.get('receive_bytes',0)),
-                'send_bytes':int(wg.get('send_bytes',0)),
-                'peer_count':int(wg.get('peer_count',0)),
-                'status_detail':wg.get('status_detail',''),
-            }
-    except Exception as e:
-        result['wireguard']['status']='unavailable'
-        result['wireguard']['detail']=str(e)
-    result['scheduler']['enabled'] = schedule_enabled()
-    if not result['scheduler']['enabled']:
-        result['scheduler']['status'] = 'disabled'
-        result['scheduler']['detail'] = 'Automatic subscription synchronization is disabled'
     return result
 
 OUTLINK_ALLOWED_HOSTS = {
