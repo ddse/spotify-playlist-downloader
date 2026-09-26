@@ -1,4 +1,5 @@
 import os
+import queue
 import subprocess
 import threading
 import time
@@ -17,28 +18,38 @@ _state = False
 _operation = None
 _operation_error = ""
 
+_MONITOR_INTERVAL = float(os.getenv("WIREGUARD_MONITOR_INTERVAL", "0.5"))
+_state_lock = threading.RLock()
+_subscribers = set()
+_last_snapshot = None
+_last_fingerprint = None
+_monitor_thread = None
+_monitor_stop = threading.Event()
+
 
 def _run(*args):
     return subprocess.run(args, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 
-def is_up():
-    """Return whether the WireGuard interface exists and is currently up.
+def _wg_show(*args):
+    """Read WireGuard state directly from the wg userspace tool."""
+    return subprocess.run(
+        ["wg", "show", INTERFACE, *args],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
-    CI and development environments may not have the WireGuard userspace
-    tools installed. Missing "wg" means the interface cannot be up; it
-    should not make diagnostics or search fail.
-    """
+
+def is_up():
+    """Return whether wg show confirms the interface exists."""
     try:
-        result = subprocess.run(
-            ["wg", "show", INTERFACE],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, OSError):
+        _wg_show()
+        return True
+    except (FileNotFoundError, OSError, subprocess.CalledProcessError):
         return False
+
 
 
 def _db_config():
@@ -233,12 +244,136 @@ def debug_status():
 
 
 
-def _public_ip():
+_PUBLIC_IP_TTL = 60
+_public_ip_cache = ""
+_public_ip_cache_at = 0.0
+_public_ip_refreshing = False
+
+
+def _refresh_public_ip():
+    global _public_ip_cache, _public_ip_cache_at, _public_ip_refreshing
     try:
-        with urllib.request.urlopen("https://api.ipify.org", timeout=5) as response:
+        with urllib.request.urlopen("https://api.ipify.org", timeout=3) as response:
+            value = response.read().decode().strip()
+        with _lock:
+            _public_ip_cache = value
+            _public_ip_cache_at = time.time()
+    except Exception:
+        pass
+    finally:
+        with _lock:
+            _public_ip_refreshing = False
+
+
+def _public_ip():
+    """Best-effort public IP lookup, used by explicit status requests."""
+    try:
+        with urllib.request.urlopen("https://api.ipify.org", timeout=2) as response:
             return response.read().decode().strip()
     except Exception:
         return ""
+
+
+def _ensure_public_ip_refresh():
+    global _public_ip_refreshing
+    with _lock:
+        if _public_ip_refreshing:
+            return
+        if _public_ip_cache and time.time() - _public_ip_cache_at < _PUBLIC_IP_TTL:
+            return
+        _public_ip_refreshing = True
+    threading.Thread(target=_refresh_public_ip, name="wireguard-public-ip", daemon=True).start()
+
+
+def _snapshot_fingerprint(snapshot):
+    import json
+    return json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+
+
+def _publish_snapshot(snapshot):
+    global _last_snapshot, _last_fingerprint
+    fingerprint = _snapshot_fingerprint(snapshot)
+    with _state_lock:
+        if fingerprint == _last_fingerprint:
+            return False
+        _last_fingerprint = fingerprint
+        _last_snapshot = dict(snapshot)
+        subscribers = list(_subscribers)
+    for subscriber in subscribers:
+        try:
+            subscriber.put_nowait(dict(snapshot))
+        except queue.Full:
+            try:
+                subscriber.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                subscriber.put_nowait(dict(snapshot))
+            except queue.Full:
+                pass
+    return True
+
+
+def wireguard_state_snapshot():
+    with _state_lock:
+        return dict(_last_snapshot) if _last_snapshot else None
+
+
+def subscribe_wireguard():
+    subscriber = queue.Queue(maxsize=4)
+    with _state_lock:
+        _subscribers.add(subscriber)
+        snapshot = dict(_last_snapshot) if _last_snapshot else None
+    return subscriber, snapshot
+
+
+def unsubscribe_wireguard(subscriber):
+    with _state_lock:
+        _subscribers.discard(subscriber)
+
+
+def _monitor_loop():
+    global _public_ip_cache, _public_ip_cache_at
+    while not _monitor_stop.is_set():
+        try:
+            snapshot = status(resolve_public_ip=False)
+            if snapshot.get("status") == "connected":
+                _ensure_public_ip_refresh()
+                with _lock:
+                    snapshot["public_ip"] = _public_ip_cache
+            else:
+                with _lock:
+                    _public_ip_cache = ""
+                    _public_ip_cache_at = 0.0
+            _publish_snapshot(snapshot)
+        except Exception as exc:
+            _publish_snapshot({
+                "enabled": False,
+                "requested_enabled": setting_enabled(),
+                "interface": INTERFACE,
+                "status": "unavailable",
+                "status_detail": f"WireGuard monitor error: {type(exc).__name__}: {exc}",
+                "public_ip": "",
+                "peer_count": 0,
+                "receive_bytes": 0,
+                "send_bytes": 0,
+            })
+        _monitor_stop.wait(_MONITOR_INTERVAL)
+
+
+def start_monitor():
+    global _monitor_thread
+    with _state_lock:
+        if _monitor_thread and _monitor_thread.is_alive():
+            return
+        _monitor_stop.clear()
+        _monitor_thread = threading.Thread(target=_monitor_loop, name="wireguard-monitor", daemon=True)
+        _monitor_thread.start()
+
+
+def stop_monitor():
+    _monitor_stop.set()
+
 
 def _route_status():
     """Detect a WireGuard default route, including wg-quick policy routing."""
@@ -271,10 +406,7 @@ def _route_status():
 
 def _handshake_status():
     try:
-        output = subprocess.run(
-            ["wg", "show", INTERFACE, "latest-handshakes"],
-            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        ).stdout.strip()
+        output = _wg_show("latest-handshakes").stdout.strip()
         now = int(time.time())
         peers = []
         recent = False
@@ -290,24 +422,21 @@ def _handshake_status():
     except Exception:
         return False, []
 
-def status():
+
+
+def status(resolve_public_ip=True):
+    global _public_ip_cache, _public_ip_cache_at
     with _lock:
         operation = _operation
         operation_error = _operation_error
         up = is_up()
         route_active, routes = _route_status() if up else (False, [])
         handshake_recent, peers = _handshake_status() if up else (False, [])
-        # Public-IP detection is diagnostic only. A slow/unreachable ipify
-        # endpoint must never turn an otherwise established WireGuard tunnel
-        # into a false "connecting" state.
-        public_ip = _public_ip() if up and route_active else ""
         vpn_route = up and route_active and handshake_recent
 
-        # During an asynchronous transition, expose the requested target rather
-        # than the last persisted preference.
         requested_enabled = (operation == "connecting") if operation else setting_enabled()
         if operation:
-            status = operation
+            current_status = operation
             status_detail = (
                 "WireGuard is connecting; waiting for the tunnel handshake"
                 if operation == "connecting"
@@ -316,24 +445,33 @@ def status():
             if operation_error:
                 status_detail += f": {operation_error}"
         elif not up:
-            status = "disconnected"
+            current_status = "disconnected"
             status_detail = "WireGuard interface is down"
         elif not route_active:
-            status = "connecting"
+            current_status = "connecting"
             status_detail = "Interface is up; waiting for WireGuard routing"
         elif not handshake_recent:
-            # An active route without a recent handshake is not an established VPN.
-            status = "connecting"
+            current_status = "connecting"
             status_detail = "Route is active; waiting for a recent peer handshake"
         else:
-            status = "connected"
+            current_status = "connected"
             status_detail = "WireGuard interface, route, and peer handshake are active"
+
+        if current_status == "connected":
+            with _lock:
+                public_ip = _public_ip_cache
+            if resolve_public_ip and not public_ip:
+                public_ip = _public_ip()
+                if public_ip:
+                    with _lock:
+                        _public_ip_cache = public_ip
+                        _public_ip_cache_at = time.time()
+        else:
+            public_ip = ""
+
         transfer = {"receive_bytes": 0, "send_bytes": 0}
         try:
-            raw = subprocess.run(
-                ["wg", "show", INTERFACE, "transfer"],
-                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            ).stdout.strip()
+            raw = _wg_show("transfer").stdout.strip()
             for line in raw.splitlines():
                 parts = line.split()
                 if len(parts) >= 3:
@@ -351,7 +489,7 @@ def status():
             "route_active": route_active,
             "handshake_recent": handshake_recent,
             "vpn_route": vpn_route,
-            "status": status,
+            "status": current_status,
             "status_detail": status_detail,
             "operation": operation,
             "operation_error": operation_error,
