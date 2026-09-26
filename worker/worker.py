@@ -505,12 +505,13 @@ def download(row, c, track_id, download_started_at=0):
         with yt_dlp.YoutubeDL(opts) as ydl:
             result = ydl.download([url])
 
-        control = c.execute(
-            "SELECT status FROM tracks WHERE spotify_id=?",
-            (track_id,),
-        ).fetchone()
-        if control and control['status'] in {'pausing', 'cancelling'}:
-            raise QueueControlError(control['status'])
+        if c is not None:
+            control = c.execute(
+                "SELECT status FROM tracks WHERE spotify_id=?",
+                (track_id,),
+            ).fetchone()
+            if control and control['status'] in {'pausing', 'cancelling'}:
+                raise QueueControlError(control['status'])
     except QueueControlError:
         raise
     except Exception as exc:
