@@ -119,7 +119,19 @@ const translations = {
     'Enter a song, artist, album, or paste a YouTube/other supported link, then press Search.':'Nhập tên bài hát, nghệ sĩ, album hoặc dán liên kết YouTube/liên kết được hỗ trợ, sau đó nhấn Tìm kiếm.',
     'Open Download options to choose audio/video, format, quality, folder, and title.':'Mở Tùy chọn tải xuống để chọn âm thanh/video, định dạng, chất lượng, thư mục và tên bài hát.',
     'Use the Queue tab to pause, retry, cancel, or monitor downloads. Completed files are available in Completed.':'Dùng Hàng đợi để tạm dừng, thử lại, hủy hoặc theo dõi tải xuống. Tệp đã xong nằm trong Đã hoàn tất.',
-    'Tip: Use Settings to configure provider credentials or WireGuard when needed.':'Mẹo: Dùng Cài đặt để cấu hình thông tin nhà cung cấp hoặc WireGuard khi cần.'
+    'Tip: Use Settings to configure provider credentials or WireGuard when needed.':'Mẹo: Dùng Cài đặt để cấu hình thông tin nhà cung cấp hoặc WireGuard khi cần.',
+    'Start tour':'Bắt đầu tour',
+    'Product tour':'Tour hướng dẫn',
+    'Choose a provider':'Chọn nhà cung cấp',
+    'Start here: enter a song, artist, album, or paste a supported link.':'Bắt đầu tại đây: nhập tên bài hát, nghệ sĩ, album hoặc dán liên kết được hỗ trợ.',
+    'Choose All or limit the search to a specific provider.':'Chọn Tất cả hoặc giới hạn tìm kiếm ở một nhà cung cấp cụ thể.',
+    'Configure providers, download behavior, and WireGuard here when needed.':'Cấu hình nhà cung cấp, cách tải xuống và WireGuard tại đây khi cần.',
+    'After adding a download, monitor progress and manage pause, retry, priority, or cancel actions here.':'Sau khi thêm tải xuống, bạn có thể theo dõi tiến trình và tạm dừng, thử lại, ưu tiên hoặc hủy tại đây.',
+    'This area is not visible yet. Continue to the next step.':'Khu vực này chưa hiển thị. Hãy tiếp tục bước tiếp theo.',
+    'Skip tour':'Bỏ qua tour',
+    'Back':'Quay lại',
+    'Next':'Tiếp theo',
+    'Done':'Hoàn tất'
   }
 };
 
