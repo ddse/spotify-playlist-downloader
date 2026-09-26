@@ -739,10 +739,6 @@ def update_track_title(track_id: str = Query(...), title: str = Form(...)):
     if not row:
         c.close()
         raise HTTPException(404, 'track not found')
-    if row['status'] == 'downloading':
-        c.close()
-        raise HTTPException(409, 'cannot rename a downloading track')
-
     old_path = (row['file_path'] or '').strip()
     new_path = ''
     if row['status'] == 'completed' and old_path:
