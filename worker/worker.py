@@ -445,6 +445,20 @@ def download(row, c, track_id, download_started_at=0):
             },
         },
         'js_runtimes': {'deno': {'path': '/usr/local/bin/deno'}},
+        # Googlevideo connections can stall while downloading large video
+        # streams. Use explicit network resilience instead of relying on
+        # yt-dlp defaults: longer socket timeout, retries, and small HTTP
+        # ranges so a stalled connection does not discard the whole transfer.
+        'socket_timeout': 60,
+        'retries': 10,
+        'fragment_retries': 10,
+        'file_access_retries': 3,
+        'retry_sleep_functions': {
+            'http': lambda n: min(30, 2 ** max(0, n - 1)),
+            'fragment': lambda n: min(30, 2 ** max(0, n - 1)),
+            'file_access': lambda n: min(10, 2 ** max(0, n - 1)),
+        },
+        'http_chunk_size': 10 * 1024 * 1024,
     }
 
     if download_type == 'audio':
