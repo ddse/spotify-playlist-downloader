@@ -840,9 +840,18 @@ def queue_bulk(action:str=Form(...),ids:str=Form('')):
             ((x,) for x in selected),
         )
     elif action == 'remove_selected' and selected:
+        # Active jobs must be cancelled by the worker before their DB row is
+        # removed; completed/queued rows can still be removed immediately.
+        c.executemany(
+            "UPDATE tracks SET status='cancelling',auto_start=0,updated_at=CURRENT_TIMESTAMP "
+            "WHERE spotify_id=? AND status='downloading'",
+            ((x,) for x in selected),
+        )
         rows=c.execute("SELECT spotify_id,file_path,status FROM tracks WHERE spotify_id=?".replace("spotify_id=?","spotify_id IN (%s)" % ",".join("?"*len(selected))), tuple(selected)).fetchall()
         music=Path(os.getenv('MUSIC_DIR','/music')).resolve()
         for row in rows:
+            if row['status'] == 'cancelling':
+                continue
             path_value=(row['file_path'] or '').strip()
             if path_value:
                 try:
@@ -851,7 +860,7 @@ def queue_bulk(action:str=Form(...),ids:str=Form('')):
                         p.unlink()
                 except OSError:
                     pass
-        c.executemany("DELETE FROM tracks WHERE spotify_id=?",( (x,) for x in selected ))
+        c.executemany("DELETE FROM tracks WHERE spotify_id=? AND status!='cancelling'",( (x,) for x in selected ))
     elif action == 'clear_completed':
         c.execute("DELETE FROM tracks WHERE status='completed'")
     elif action == 'clear_failed':
