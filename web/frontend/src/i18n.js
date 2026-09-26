@@ -109,7 +109,17 @@ const translations = {
     'Peers':'Peer',
     'Paste the contents of wg0.conf here':'Dán nội dung wg0.conf vào đây',
     'Configuration is saved and hidden. Paste a new config to replace it.':'Cấu hình đã được lưu và ẩn. Dán cấu hình mới để thay thế.',
-    'WireGuard configuration saved. It will not be shown again.':'Đã lưu cấu hình WireGuard. Cấu hình sẽ không được hiển thị lại.'
+    'WireGuard configuration saved. It will not be shown again.':'Đã lưu cấu hình WireGuard. Cấu hình sẽ không được hiển thị lại.',
+    'Quick start guide':'Hướng dẫn bắt đầu nhanh',
+    'New here? Start in 3 steps':'Mới sử dụng? Bắt đầu với 3 bước',
+    'A quick guide to search, customize, and download your music.':'Hướng dẫn nhanh để tìm kiếm, tùy chỉnh và tải nhạc.',
+    'Dismiss guide':'Đóng hướng dẫn',
+    'Choose options':'Chọn tùy chọn',
+    'Track progress':'Theo dõi tiến trình',
+    'Enter a song, artist, album, or paste a YouTube/other supported link, then press Search.':'Nhập tên bài hát, nghệ sĩ, album hoặc dán liên kết YouTube/liên kết được hỗ trợ, sau đó nhấn Tìm kiếm.',
+    'Open Download options to choose audio/video, format, quality, folder, and title.':'Mở Tùy chọn tải xuống để chọn âm thanh/video, định dạng, chất lượng, thư mục và tên bài hát.',
+    'Use the Queue tab to pause, retry, cancel, or monitor downloads. Completed files are available in Completed.':'Dùng Hàng đợi để tạm dừng, thử lại, hủy hoặc theo dõi tải xuống. Tệp đã xong nằm trong Đã hoàn tất.',
+    'Tip: Use Settings to configure provider credentials or WireGuard when needed.':'Mẹo: Dùng Cài đặt để cấu hình thông tin nhà cung cấp hoặc WireGuard khi cần.'
   }
 };
 
