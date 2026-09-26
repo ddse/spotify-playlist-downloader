@@ -340,6 +340,33 @@ def resolve_direct_link_metadata(row, c, track_id, url):
         return row['title'], row['artists'], row['album']
 
 
+def rename_download_to_current_title(c, track_id, file_path):
+    """Apply a title edited while downloading to the completed media filename."""
+    if not file_path:
+        return file_path
+    source = Path(file_path).resolve()
+    music = Path(MUSIC_DIR).resolve()
+    try:
+        source.relative_to(music)
+    except ValueError:
+        logger.warning('skip title rename outside MUSIC_DIR track=%s path=%s', track_id, source)
+        return str(source)
+    if not source.is_file():
+        return str(source)
+    row = c.execute('SELECT title FROM tracks WHERE spotify_id=?', (track_id,)).fetchone()
+    if not row:
+        return str(source)
+    title = _safe_filename_component(row['title'])
+    destination = source.with_name(title + source.suffix)
+    if destination == source:
+        return str(source)
+    if destination.exists():
+        logger.warning('skip title rename because destination exists track=%s destination=%s', track_id, destination)
+        return str(source)
+    source.rename(destination)
+    logger.info('renamed completed media track=%s from=%s to=%s', track_id, source, destination)
+    return str(destination)
+
 def download(row, c, track_id, download_started_at=0):
     Path(MUSIC_DIR).mkdir(parents=True, exist_ok=True)
     source_mode = row['source_mode'] or 'single'
@@ -579,6 +606,7 @@ def run_worker():
                             'download completed but output media file was not found; '
                             f'recent_media={recent}'
                         )
+                    file_path = rename_download_to_current_title(c, track_id, file_path)
                     c.execute(
                         "UPDATE tracks SET status='completed',progress=100,error=NULL,file_path=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
                         (file_path, track_id),
