@@ -98,6 +98,14 @@ def test_downloading_queue_controllers_pause_prioritize_and_cancel(tmp_path, mon
     assert tuple(row) == ("cancelling", 0)
 
 
+def test_bulk_cancel_selected_marks_active_downloads(tmp_path, monkeypatch):
+    connect, client = _client(tmp_path, monkeypatch); _seed(connect, "downloading")
+    r = client.post("/api/queue/bulk", data={"action": "clear_selected", "ids": TRACK_ID})
+    assert r.status_code == 200 and r.json() == {"ok": True}
+    c = connect(); row = c.execute("SELECT status,auto_start FROM tracks WHERE spotify_id=?", (TRACK_ID,)).fetchone(); c.close()
+    assert tuple(row) == ("cancelling", 0)
+
+
 def test_queue_cancel_removes_non_active_job(tmp_path, monkeypatch):
     connect, client = _client(tmp_path, monkeypatch); _seed(connect, "queued")
     assert client.post("/api/queue/cancel", params={"track_id": TRACK_ID}).json() == {"ok": True}
