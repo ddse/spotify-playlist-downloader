@@ -90,6 +90,7 @@ def test_downloading_queue_controllers_pause_prioritize_and_cancel(tmp_path, mon
     assert tuple(row) == ("pausing", 0, 1)
 
     # Cancel a second active job without deleting the row underneath the worker.
+    c = connect(); c.execute("DELETE FROM tracks WHERE spotify_id=?", (TRACK_ID,)); c.commit(); c.close()
     connect2, client2 = _client(tmp_path, monkeypatch)
     _seed(connect2, "downloading")
     assert client2.post("/api/queue/cancel", params={"track_id": TRACK_ID}).json() == {"ok": True}
