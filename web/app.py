@@ -164,12 +164,42 @@ def provider_row(c, provider):
     if cfg.get('cookies'): safe['cookies']='********'
     return {'provider':provider,'enabled':bool(row['enabled']),'config':safe,'configured':configured,'status':row['status'] or 'not_configured','error':row['error'] or '','last_tested_at':row['last_tested_at']}
 
+SCHEDULE_SETTING_KEY = 'schedule_enabled'
+
+def schedule_enabled():
+    """Return the global subscription scheduler preference; default is enabled."""
+    c = db()
+    row = c.execute('SELECT value FROM app_settings WHERE key=?', (SCHEDULE_SETTING_KEY,)).fetchone()
+    c.close()
+    if row is None:
+        return True
+    return str(row['value']).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+def set_schedule_enabled(enabled: bool):
+    c = db()
+    c.execute('INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+              (SCHEDULE_SETTING_KEY, '1' if enabled else '0'))
+    c.commit(); c.close()
+
 def wireguard_configured():
     c = db()
     row = c.execute("SELECT value FROM app_settings WHERE key='wireguard_config'").fetchone()
     c.close()
     return bool(row and (row["value"] or "").strip())
 
+
+@app.get('/api/settings/schedule')
+def schedule_settings():
+    return {'enabled': schedule_enabled()}
+
+@app.put('/api/settings/schedule')
+async def update_schedule_settings(request: Request):
+    body = await request.json()
+    if 'enabled' not in body or not isinstance(body['enabled'], bool):
+        raise HTTPException(400, 'enabled must be a boolean')
+    enabled = body['enabled']
+    set_schedule_enabled(enabled)
+    return {'ok': True, 'enabled': enabled}
 
 @app.get('/api/settings/wireguard')
 async def wireguard_settings():
@@ -353,6 +383,10 @@ async def services():
     except Exception as e:
         result['wireguard']['status']='unavailable'
         result['wireguard']['detail']=str(e)
+    result['scheduler']['enabled'] = schedule_enabled()
+    if not result['scheduler']['enabled']:
+        result['scheduler']['status'] = 'disabled'
+        result['scheduler']['detail'] = 'Automatic subscription synchronization is disabled'
     return result
 
 OUTLINK_ALLOWED_HOSTS = {
