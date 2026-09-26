@@ -211,6 +211,18 @@ def test_frontend_exposes_new_user_onboarding_guide():
     assert "Track progress" in text
     assert "Tip: Use Settings to configure provider credentials or WireGuard when needed." in text
 
+def test_frontend_exposes_interactive_product_tour():
+    source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
+    text = source.read_text(encoding="utf-8")
+    assert "function ProductTour" in text
+    assert "music-tour-completed" in text
+    assert "data-tour=\"tour-search\"" in text
+    assert "data-tour=\"tour-source\"" in text
+    assert "data-tour=\"tour-settings\"" in text
+    assert "data-tour=\"tour-queue\"" in text
+    assert "Skip tour" in text
+    assert "Next" in text
+
 def test_frontend_exposes_visible_edit_title_button_in_queue_and_completed():
     source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
     text = source.read_text(encoding="utf-8")
