@@ -175,3 +175,93 @@ def test_mp4_video_download_requires_mp4_video_stream(tmp_path, monkeypatch):
     assert "bestaudio[ext=m4a]" in fmt
     assert "best[" not in fmt
     assert "bestvideo" in fmt
+
+
+def test_youtube_audio_download_keeps_audio_only_postprocessor(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "MUSIC_DIR", str(tmp_path))
+    row = {
+        "source_url": "https://www.youtube.com/watch?v=eR_RNVgewSc",
+        "source_mode": "single",
+        "artists": "YouTube",
+        "album": "YouTube",
+        "title": "Faded",
+        "download_folder": "",
+        "download_type": "audio",
+        "source_type": "youtube",
+        "download_format": "mp3",
+        "download_quality": "320",
+        "video_codec": "auto",
+        "thumbnail": 0,
+        "subtitle": 0,
+        "subtitle_lang": "ja,en",
+        "subtitle_mode": "prefer_manual",
+        "split_chapters": 0,
+    }
+
+    class FakeYDL:
+        captured = None
+        def __init__(self, opts):
+            self.opts = opts
+            FakeYDL.captured = opts
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def download(self, urls):
+            return 0
+
+    with patch.object(worker.yt_dlp, "YoutubeDL", FakeYDL):
+        result = worker.download(row, None, "yt:eR_RNVgewSc")
+
+    assert result is None
+    assert FakeYDL.captured["format"] == "bestaudio/best"
+    assert FakeYDL.captured["postprocessors"][0]["key"] == "FFmpegExtractAudio"
+    assert "merge_output_format" not in FakeYDL.captured
+
+
+def test_youtube_video_download_requests_video_plus_audio_and_mp4(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker, "MUSIC_DIR", str(tmp_path))
+    row = {
+        "source_url": "https://www.youtube.com/watch?v=eR_RNVgewSc",
+        "source_mode": "single",
+        "artists": "YouTube",
+        "album": "YouTube",
+        "title": "Video",
+        "download_folder": "",
+        "download_type": "video",
+        "source_type": "youtube",
+        "download_format": "mp4",
+        "download_quality": "1080",
+        "video_codec": "h264",
+        "thumbnail": 0,
+        "subtitle": 0,
+        "subtitle_lang": "ja,en",
+        "subtitle_mode": "prefer_manual",
+        "split_chapters": 0,
+    }
+
+    class FakeYDL:
+        captured = None
+        def __init__(self, opts):
+            self.opts = opts
+            FakeYDL.captured = opts
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def download(self, urls):
+            return 0
+
+    with patch.object(worker.yt_dlp, "YoutubeDL", FakeYDL):
+        result = worker.download(row, None, "yt:eR_RNVgewSc")
+
+    assert result is None
+    opts = FakeYDL.captured
+    assert "bestvideo" in opts["format"]
+    assert "bestaudio" in opts["format"]
+    assert "height<=1080" in opts["format"]
+    assert "ext=mp4" in opts["format"]
+    assert opts["merge_output_format"] == "mp4"
+    assert not any(
+        pp.get("key") == "FFmpegExtractAudio" for pp in opts.get("postprocessors", [])
+    )
