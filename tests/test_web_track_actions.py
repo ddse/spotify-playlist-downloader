@@ -275,5 +275,5 @@ def test_frontend_mobile_mockup_has_bottom_navigation_and_compact_actions():
     assert "window.scrollTo({top:0,behavior:'smooth'})" in text
     assert "tab==='downloading'?'bg-violet-600/20" in text
     assert "tab==='completed'?'bg-violet-600/20" in text
-    assert "className="scrollbar mt-3 flex gap-2 overflow-x-auto pb-1"" in text
+    assert 'className="scrollbar mt-3 flex gap-2 overflow-x-auto pb-1"' in text
     assert "hidden sm:inline" in text
