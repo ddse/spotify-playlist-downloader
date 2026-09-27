@@ -239,3 +239,30 @@ def test_frontend_exposes_visible_edit_title_button_in_queue_and_completed():
     assert 'function CompletedTitleEditor' in text
     assert "disabled={x.status==='downloading'}" not in text
     assert "track.status!=='downloading'" not in text
+
+
+def test_frontend_mobile_layout_does_not_force_queue_table_on_small_screens():
+    source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
+    text = source.read_text(encoding="utf-8")
+    assert 'grid min-w-0 grid-cols-1 items-start gap-3 md:min-w-[900px]' in text
+    assert 'hidden min-w-[900px] grid-cols-[34px_2fr_100px_1.3fr_1.5fr_220px]' in text
+    assert 'grid grid-cols-1 gap-3 sm:grid-cols-3' in text
+
+
+def test_frontend_completed_player_has_explicit_start_pause_stop_controls():
+    source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
+    text = source.read_text(encoding="utf-8")
+    assert "function PlayDialog" in text
+    assert "togglePlayback" in text
+    assert "t('Pause')" in text
+    assert "t('Start')" in text
+    assert "t('Stop')" in text
+    assert "mediaRef.current" in text
+
+
+def test_frontend_uses_device_color_scheme_for_light_and_dark():
+    source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "styles.css"
+    text = source.read_text(encoding="utf-8")
+    assert "prefers-color-scheme: light" in text
+    assert "color-scheme:dark" in text
+    assert "color-scheme:light" in text
