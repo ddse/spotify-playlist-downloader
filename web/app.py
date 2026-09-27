@@ -418,6 +418,9 @@ async def test_provider_connection(provider:str):
 @app.get('/api/services')
 async def services():
     c=db(); result={k:worker_state(c,k) for k in ('worker','scheduler')}; c.close()
+    # The scheduler heartbeat reports process health, while this setting is
+    # the authoritative on/off state for background subscription sync.
+    result['scheduler']['enabled'] = schedule_enabled()
     wg = app.state.wireguard_state or {}
     result['wireguard'] = {
         'enabled': bool(wg.get('enabled')),
