@@ -18,7 +18,7 @@ const translations = {
     'Videos':'Video',
     'Start':'Bắt đầu',
     'Now':'Ngay',
-    'Pause':'Tạm dừng',
+    'Pause':'Tạm dừng','Stop':'Dừng','Start':'Bắt đầu',
     'Thumbnail':'Ảnh thu nhỏ',
     'Subtitle':'Phụ đề',
     'Languages':'Ngôn ngữ',
