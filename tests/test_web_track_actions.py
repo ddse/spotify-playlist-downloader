@@ -357,6 +357,6 @@ def test_frontend_shows_media_validation_icon():
     assert "media_validation_status" in text
     assert "Validated media" in text
     assert "Media needs validation" in text
-    assert "status==='valid'" in text
+    assert "effectiveStatus==='valid'" in text
     assert "x.media_validation_status || (x.status==='completed'?'valid':'')" not in text
     assert "ValidationIcon status={x.media_validation_status}" in text
