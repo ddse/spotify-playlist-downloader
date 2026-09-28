@@ -277,3 +277,73 @@ def test_frontend_mobile_mockup_has_bottom_navigation_and_compact_actions():
     assert "tab==='completed'?'bg-violet-600/20" in text
     assert 'className="scrollbar mt-3 flex gap-2 overflow-x-auto pb-1"' in text
     assert "hidden sm:inline" in text
+
+
+def test_jobs_history_and_playlists_are_paginated(tmp_path, monkeypatch):
+    connect, client = _client(tmp_path, monkeypatch)
+    c = connect()
+    for i in range(5):
+        c.execute(
+            """INSERT INTO tracks(
+                spotify_id,title,artists,album,spotify_url,status,progress,
+                source_type,source_url,file_path
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (f"track-{i}", f"Track {i}", "Artist", "Album",
+             f"https://example.com/{i}", "queued", 0, "youtube",
+             f"https://example.com/{i}", ""),
+        )
+        c.execute(
+            """INSERT INTO playlists(spotify_id,name,url,enabled)
+               VALUES(?,?,?,1)""",
+            (f"playlist-{i}", f"Playlist {i}", f"https://spotify.com/{i}"),
+        )
+    for i in range(5):
+        c.execute(
+            """INSERT INTO tracks(
+                spotify_id,title,artists,album,spotify_url,status,progress,
+                source_type,source_url,file_path
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (f"done-{i}", f"Done {i}", "Artist", "Album",
+             f"https://example.com/done/{i}", "completed", 100, "youtube",
+             f"https://example.com/done/{i}", ""),
+        )
+    c.commit()
+    c.close()
+
+    queue_page_1 = client.get("/api/jobs?page=1&page_size=2")
+    assert queue_page_1.status_code == 200
+    payload = queue_page_1.json()
+    assert payload["total"] == 5
+    assert payload["page"] == 1
+    assert payload["page_size"] == 2
+    assert payload["total_pages"] == 3
+    assert len(payload["items"]) == 2
+    assert payload["has_next"] is True
+    assert payload["has_previous"] is False
+
+    queue_page_3 = client.get("/api/jobs?page=3&page_size=2").json()
+    assert queue_page_3["page"] == 3
+    assert len(queue_page_3["items"]) == 1
+    assert queue_page_3["has_next"] is False
+
+    history = client.get("/api/history?page=2&page_size=3").json()
+    assert history["total"] == 5
+    assert history["total_pages"] == 2
+    assert len(history["items"]) == 2
+
+    subscriptions = client.get("/api/playlists?page=2&page_size=3").json()
+    assert subscriptions["total"] == 5
+    assert subscriptions["total_pages"] == 2
+    assert len(subscriptions["items"]) == 2
+
+
+def test_pagination_page_size_is_bounded_and_page_is_normalized(tmp_path, monkeypatch):
+    _, client = _client(tmp_path, monkeypatch)
+    response = client.get("/api/jobs?page=0&page_size=1000")
+    assert response.status_code == 422
+
+    response = client.get("/api/jobs?page=1&page_size=100")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["page"] == 1
+    assert payload["page_size"] == 100
