@@ -966,17 +966,62 @@ def delete_playlist(playlist_id:str):
 def toggle_playlist(playlist_id:str):
     c=db(); c.execute('UPDATE playlists SET enabled=CASE enabled WHEN 1 THEN 0 ELSE 1 END WHERE spotify_id=?',(playlist_id,)); row=c.execute('SELECT enabled FROM playlists WHERE spotify_id=?',(playlist_id,)).fetchone(); c.commit(); c.close(); return {'ok':row is not None,'enabled':bool(row['enabled']) if row else False}
 
+def _pagination_params(page: int, page_size: int):
+    page = max(1, int(page))
+    page_size = min(100, max(1, int(page_size)))
+    return page, page_size, (page - 1) * page_size
+
+def _paged_response(rows, total, page, page_size):
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    return {
+        'items': [dict(r) for r in rows],
+        'page': page,
+        'page_size': page_size,
+        'total': total,
+        'total_pages': total_pages,
+        'has_previous': page > 1,
+        'has_next': page < total_pages,
+    }
+
 @app.get('/api/playlists')
-def playlists():
-    c=db(); rows=c.execute('SELECT * FROM playlists ORDER BY name').fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
+def playlists(page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
+    page, page_size, offset = _pagination_params(page, page_size)
+    c = db()
+    total = c.execute('SELECT COUNT(*) FROM playlists').fetchone()[0]
+    rows = c.execute('SELECT * FROM playlists ORDER BY name LIMIT ? OFFSET ?', (page_size, offset)).fetchall()
+    c.close()
+    return _paged_response(rows, total, page, page_size)
 
 @app.get('/api/jobs')
-def jobs():
-    c=db(); rows=c.execute("SELECT * FROM tracks ORDER BY CASE status WHEN 'downloading' THEN 0 WHEN 'queued' THEN 1 WHEN 'pending_source' THEN 2 WHEN 'failed' THEN 3 ELSE 4 END,updated_at DESC LIMIT 100").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
+def jobs(page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
+    page, page_size, offset = _pagination_params(page, page_size)
+    c = db()
+    statuses = ('downloading', 'queued', 'paused', 'pending_source', 'failed')
+    placeholders = ','.join('?' for _ in statuses)
+    total = c.execute(f'SELECT COUNT(*) FROM tracks WHERE status IN ({placeholders})', statuses).fetchone()[0]
+    rows = c.execute(
+        f"""SELECT * FROM tracks WHERE status IN ({placeholders})
+            ORDER BY CASE status WHEN 'downloading' THEN 0 WHEN 'queued' THEN 1
+            WHEN 'paused' THEN 2 WHEN 'pending_source' THEN 3 WHEN 'failed' THEN 4 ELSE 5 END,
+            updated_at DESC LIMIT ? OFFSET ?""",
+        (*statuses, page_size, offset),
+    ).fetchall()
+    c.close()
+    return _paged_response(rows, total, page, page_size)
 
 @app.get('/api/history')
-def history():
-    c=db(); rows=c.execute("SELECT * FROM tracks WHERE status IN ('completed','failed') ORDER BY updated_at DESC LIMIT 200").fetchall(); c.close(); return {'items':[dict(r) for r in rows]}
+def history(page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
+    page, page_size, offset = _pagination_params(page, page_size)
+    c = db()
+    statuses = ('completed', 'failed')
+    placeholders = ','.join('?' for _ in statuses)
+    total = c.execute(f'SELECT COUNT(*) FROM tracks WHERE status IN ({placeholders})', statuses).fetchone()[0]
+    rows = c.execute(
+        f'SELECT * FROM tracks WHERE status IN ({placeholders}) ORDER BY updated_at DESC LIMIT ? OFFSET ?',
+        (*statuses, page_size, offset),
+    ).fetchall()
+    c.close()
+    return _paged_response(rows, total, page, page_size)
 
 @app.get('/api/files')
 def download_file(track_id:str=Query(...), download:bool=Query(False)):
