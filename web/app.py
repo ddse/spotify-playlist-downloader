@@ -1008,7 +1008,6 @@ def remove_file(track_id:str=Query(...)):
     c.close()
     return {'ok':True}
 
-@app.post('/api/retry')
 @app.post('/api/tracks/validate')
 async def validate_track_media(track_id: str = Query(...)):
     try:
