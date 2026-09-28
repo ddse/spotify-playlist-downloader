@@ -7,11 +7,23 @@ import threading
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import wireguard as manager
+try:
+    from . import wireguard as manager
+except ImportError:  # pragma: no cover
+    import wireguard as manager
+
 try:
     from .providers import PROVIDERS
 except ImportError:  # pragma: no cover - supports running search.py directly
     from providers import PROVIDERS
+
+try:
+    from .media_validation import validate_media_file, file_fingerprint, CURRENT_VALIDATION_VERSION
+    from .media_repair import repair_media_file
+except ImportError:  # pragma: no cover
+    from media_validation import validate_media_file, file_fingerprint, CURRENT_VALIDATION_VERSION
+    from media_repair import repair_media_file
+
 
 PAGE_SIZE = 10
 HOST = "0.0.0.0"
@@ -202,6 +214,53 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if parsed.path in {"/api/media/validate", "/api/media/repair"}:
+            try:
+                from database import db
+                params = parse_qs(parsed.query)
+                track_id = params.get("track_id", [""])[0]
+                c = db()
+                row = c.execute("SELECT * FROM tracks WHERE spotify_id=?", (track_id,)).fetchone()
+                if not row or not row["file_path"]:
+                    c.close()
+                    return self._json(404, {"ok": False, "error": "track or media file not found"})
+                path = row["file_path"]
+                media_type = "video" if (row["download_type"] or "audio") == "video" else "audio"
+                if parsed.path.endswith("/validate"):
+                    result = validate_media_file(path, media_type)
+                    if result.valid:
+                        size, mtime = file_fingerprint(path)
+                        c.execute("""UPDATE tracks SET media_validation_status='valid',media_validation_at=CURRENT_TIMESTAMP,
+                            media_validation_version=?,media_validation_error=NULL,media_validation_size=?,media_validation_mtime_ns=?
+                            WHERE spotify_id=?""", (CURRENT_VALIDATION_VERSION, size, mtime, track_id))
+                    else:
+                        c.execute("UPDATE tracks SET media_validation_status='invalid',media_validation_error=? WHERE spotify_id=?",
+                                  (result.reason, track_id))
+                    c.commit(); c.close()
+                    return self._json(200, {"ok": result.valid, "status": "valid" if result.valid else "invalid", "reason": result.reason})
+                c.execute("UPDATE tracks SET media_validation_status='repairing',media_validation_error=NULL WHERE spotify_id=?", (track_id,))
+                c.commit()
+                repair_path = path + ".repair"
+                try:
+                    repair_media_file(path, repair_path, media_type=media_type,
+                                      audio_format=row["download_format"] or "mp3", bitrate=os.getenv("AUDIO_BITRATE", "320k"))
+                    os.replace(repair_path, path)
+                    size, mtime = file_fingerprint(path)
+                    c.execute("""UPDATE tracks SET media_validation_status='valid',media_validation_at=CURRENT_TIMESTAMP,
+                        media_validation_version=?,media_validation_error=NULL,media_validation_size=?,media_validation_mtime_ns=?,
+                        media_repair_attempts=media_repair_attempts+1 WHERE spotify_id=?""",
+                              (CURRENT_VALIDATION_VERSION, size, mtime, track_id))
+                    c.commit(); c.close()
+                    return self._json(200, {"ok": True, "status": "valid"})
+                except Exception as exc:
+                    if os.path.exists(repair_path):
+                        os.unlink(repair_path)
+                    c.execute("UPDATE tracks SET media_validation_status='repair_failed',media_validation_error=?,media_repair_attempts=media_repair_attempts+1 WHERE spotify_id=?",
+                              (str(exc), track_id))
+                    c.commit(); c.close()
+                    return self._json(422, {"ok": False, "status": "repair_failed", "error": str(exc)})
+            except Exception as exc:
+                return self._json(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
         if parsed.path != "/api/wireguard":
             return self._json(404, {"error": "not found"})
         try:

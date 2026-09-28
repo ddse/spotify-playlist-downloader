@@ -3,12 +3,25 @@ from pathlib import Path
 
 import yt_dlp
 import threading
-from search import serve as serve_search_api
+try:
+    from .search import serve as serve_search_api
+except ImportError:  # pragma: no cover
+    from search import serve as serve_search_api
 from yt_dlp.utils import DownloadError
 
-import wireguard as manager
-from providers.zingmp3 import get_stream_url as zing_get_stream_url
-from providers.nhaccuatui import get_stream_url as nct_get_stream_url
+try:
+    from .jellyfin import refresh_library as refresh_jellyfin_library
+except ImportError:  # pragma: no cover
+    from jellyfin import refresh_library as refresh_jellyfin_library
+
+try:
+    from . import wireguard as manager
+    from .providers.zingmp3 import get_stream_url as zing_get_stream_url
+    from .providers.nhaccuatui import get_stream_url as nct_get_stream_url
+except ImportError:  # pragma: no cover
+    import wireguard as manager
+    from providers.zingmp3 import get_stream_url as zing_get_stream_url
+    from providers.nhaccuatui import get_stream_url as nct_get_stream_url
 
 import re
 import urllib.request
@@ -99,8 +112,115 @@ def format_speed(value):
     return f'{value:.1f} {units[i]}'
 
 
-from output import describe_recent_media, resolve_downloaded_file
-from progress import clear_download_progress
+try:
+    from .output import describe_recent_media, resolve_downloaded_file
+    from .media_validation import CURRENT_VALIDATION_VERSION, validate_media_file, file_fingerprint
+    from .media_repair import repair_media_file
+    from .progress import clear_download_progress
+except ImportError:  # pragma: no cover
+    from output import describe_recent_media, resolve_downloaded_file
+    from media_validation import CURRENT_VALIDATION_VERSION, validate_media_file, file_fingerprint
+    from media_repair import repair_media_file
+    from progress import clear_download_progress
+
+MEDIA_MAX_ATTEMPTS = int(os.getenv('MEDIA_MAX_ATTEMPTS', '3'))
+MEDIA_REPAIR_MAX_ATTEMPTS = int(os.getenv('MEDIA_REPAIR_MAX_ATTEMPTS', '1'))
+
+def _set_media_state(c, track_id, status, error=None, attempts=None, repair_attempts=None):
+    fields = ["media_validation_status=?", "media_validation_error=?", "updated_at=CURRENT_TIMESTAMP"]
+    values = [status, error]
+    if attempts is not None:
+        fields.append("media_validation_attempts=?"); values.append(attempts)
+    if repair_attempts is not None:
+        fields.append("media_repair_attempts=?"); values.append(repair_attempts)
+    values.append(track_id)
+    c.execute(f"UPDATE tracks SET {','.join(fields)} WHERE spotify_id=?", values)
+
+def validate_and_record(c, track_id, file_path, media_type):
+    _set_media_state(c, track_id, 'checking', None)
+    c.commit()
+    result = validate_media_file(file_path, media_type)
+    row = c.execute("SELECT media_validation_attempts FROM tracks WHERE spotify_id=?", (track_id,)).fetchone()
+    attempts = int((row[0] if row else 0) or 0) + 1
+    if result.valid:
+        size, mtime_ns = file_fingerprint(file_path)
+        c.execute("""UPDATE tracks SET media_validation_status='valid',media_validation_at=CURRENT_TIMESTAMP,
+            media_validation_version=?,media_validation_error=NULL,media_validation_attempts=?,
+            media_validation_size=?,media_validation_mtime_ns=?,media_validation_sha256=NULL,
+            updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?""",
+            (CURRENT_VALIDATION_VERSION, attempts, size, mtime_ns, track_id))
+    else:
+        _set_media_state(c, track_id, 'invalid', result.reason, attempts=attempts)
+    c.commit()
+    return result
+
+def reconcile_media_validation(c):
+    rows = c.execute("""SELECT spotify_id,file_path,media_validation_status,media_validation_version,
+        media_validation_size,media_validation_mtime_ns,status FROM tracks
+        WHERE status='completed' OR media_validation_status IN ('checking','repairing')""").fetchall()
+    for row in rows:
+        if row['media_validation_status'] in ('checking', 'repairing'):
+            _set_media_state(c, row['spotify_id'], 'unchecked', 'worker restarted before validation completed')
+            continue
+        path = Path(row['file_path'] or '')
+        if row['media_validation_status'] == 'valid' and path.is_file():
+            try:
+                size, mtime_ns = file_fingerprint(path)
+                if (int(row['media_validation_version'] or 0) == CURRENT_VALIDATION_VERSION and
+                    row['media_validation_size'] is not None and row['media_validation_mtime_ns'] is not None and
+                    int(row['media_validation_size']) == size and int(row['media_validation_mtime_ns']) == mtime_ns):
+                    continue
+            except OSError:
+                pass
+        _set_media_state(c, row['spotify_id'], 'unchecked', 'media file changed or validation metadata is stale')
+    c.commit()
+
+def validate_with_repair(c, track_id, file_path, media_type, output_format):
+    result = validate_and_record(c, track_id, file_path, media_type)
+    if result.valid:
+        return file_path
+    if result.infrastructure_error:
+        raise RuntimeError(result.reason or 'media validation infrastructure failure')
+    for repair_attempt in range(1, MEDIA_REPAIR_MAX_ATTEMPTS + 1):
+        _set_media_state(c, track_id, 'repairing', result.reason, repair_attempts=repair_attempt)
+        c.commit()
+        repair_path = Path(file_path).with_name(Path(file_path).name + '.repair')
+        try:
+            repair_media_file(file_path, repair_path, media_type=media_type,
+                              audio_format=output_format if media_type == 'audio' else None,
+                              bitrate=BITRATE)
+            repair_result = validate_and_record(c, track_id, repair_path, media_type)
+            if repair_result.valid:
+                Path(repair_path).replace(file_path)
+                final_result = validate_and_record(c, track_id, file_path, media_type)
+                if final_result.valid:
+                    return file_path
+        except Exception as exc:
+            logger.warning('media repair failed track=%s attempt=%s error=%s', track_id, repair_attempt, exc)
+        finally:
+            Path(repair_path).unlink(missing_ok=True)
+    raise RuntimeError(f'media validation failed after repair: {result.reason or "unknown media error"}')
+
+
+def validate_downloaded_output(c, row, track_id, result_path, download_started_at):
+    """Resolve, fingerprint and validate a newly downloaded media file before completion."""
+    file_path = str(Path(result_path).resolve()) if result_path else resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
+    if file_path and not Path(file_path).is_file():
+        file_path = resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
+    if not file_path:
+        recent = describe_recent_media(MUSIC_DIR, download_started_at)
+        raise RuntimeError('download completed but output media file was not found; recent_media=' + recent)
+    file_path = rename_download_to_current_title(c, track_id, file_path)
+    media_type = 'video' if (row['download_type'] or 'audio') == 'video' else 'audio'
+    output_format = row['download_format'] or ('mp4' if media_type == 'video' else FMT)
+    logger.info('media validation start track=%s path=%s type=%s', track_id, file_path, media_type)
+    validate_with_repair(c, track_id, file_path, media_type, output_format)
+    row_after = c.execute('SELECT media_validation_status FROM tracks WHERE spotify_id=?', (track_id,)).fetchone()
+    if not row_after or row_after['media_validation_status'] != 'valid':
+        raise RuntimeError('downloaded media validation did not produce valid state')
+    logger.info('media validation passed track=%s path=%s', track_id, file_path)
+    return file_path
+
 
 def format_eta(seconds):
     if seconds is None or seconds < 0:
@@ -565,6 +685,7 @@ def run_worker():
                 c = conn()
                 init(c)
                 heartbeat(c)
+                reconcile_media_validation(c)
 
                 row = c.execute(
                     "SELECT * FROM tracks WHERE status='queued' AND source_url IS NOT NULL ORDER BY priority DESC, created_at LIMIT 1"
@@ -587,30 +708,34 @@ def run_worker():
                 use_wireguard = bool(row['wireguard'])
                 download_started_at = time.time()
                 try:
-                    result_path = manager.run_download(
-                        use_wireguard,
-                        lambda: download(row, c, track_id, download_started_at),
-                    )
-                    file_path = str(Path(result_path).resolve()) if result_path else resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
-                    if file_path and not Path(file_path).is_file():
-                        logger.warning('download returned missing path track=%s path=%s; falling back to scan', track_id, file_path)
-                        file_path = resolve_downloaded_file(row, MUSIC_DIR, download_started_at)
-                    logger.info('download output resolved track=%s path=%s', track_id, file_path or '<missing>')
-                    if not file_path:
-                        recent = describe_recent_media(MUSIC_DIR, download_started_at)
-                        logger.error(
-                            'download returned success but no media output was found track=%s recent_media=%s',
-                            track_id, recent,
-                        )
-                        raise RuntimeError(
-                            'download completed but output media file was not found; '
-                            f'recent_media={recent}'
-                        )
-                    file_path = rename_download_to_current_title(c, track_id, file_path)
+                    last_validation_error = None
+                    file_path = None
+                    for attempt in range(1, MEDIA_MAX_ATTEMPTS + 1):
+                        try:
+                            _set_media_state(c, track_id, 'unchecked', None)
+                            c.commit()
+                            result_path = manager.run_download(
+                                use_wireguard,
+                                lambda: download(row, c, track_id, download_started_at),
+                            )
+                            file_path = validate_downloaded_output(c, row, track_id, result_path, download_started_at)
+                            break
+                        except Exception as attempt_error:
+                            last_validation_error = attempt_error
+                            logger.warning('download/validation attempt failed track=%s attempt=%s/%s error=%s',
+                                           track_id, attempt, MEDIA_MAX_ATTEMPTS, attempt_error)
+                            if attempt < MEDIA_MAX_ATTEMPTS:
+                                _set_media_state(c, track_id, 'unchecked', str(attempt_error))
+                                c.commit()
+                                continue
+                            raise last_validation_error
                     c.execute(
-                        "UPDATE tracks SET status='completed',progress=100,error=NULL,file_path=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
+                        "UPDATE tracks SET status='completed',progress=100,error=NULL,file_path=?,download_speed='',eta='',updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND media_validation_status='valid'",
                         (file_path, track_id),
                     )
+                    if c.execute("SELECT changes()").fetchone()[0] != 1:
+                        raise RuntimeError('media validation did not complete successfully')
+                    refresh_jellyfin_library(c)
                 except Exception as e:
                     logger.exception('download job failed track=%s', track_id)
                     err = format_error(e, getattr(e, 'logs', ''))

@@ -29,6 +29,15 @@ TRACK_BASE_COLUMNS = {
     'wireguard': 'INTEGER DEFAULT 0',
     'file_path': "TEXT DEFAULT ''",
     'title_override': 'INTEGER DEFAULT 0',
+    'media_validation_status': "TEXT NOT NULL DEFAULT 'unchecked'",
+    'media_validation_at': 'TEXT',
+    'media_validation_version': 'INTEGER NOT NULL DEFAULT 0',
+    'media_validation_error': 'TEXT',
+    'media_validation_attempts': 'INTEGER NOT NULL DEFAULT 0',
+    'media_repair_attempts': 'INTEGER NOT NULL DEFAULT 0',
+    'media_validation_size': 'INTEGER',
+    'media_validation_mtime_ns': 'INTEGER',
+    'media_validation_sha256': 'TEXT',
 }
 
 
