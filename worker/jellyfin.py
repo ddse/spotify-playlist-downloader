@@ -33,7 +33,7 @@ def refresh_library(c):
     try:
         response = httpx.post(
             endpoint,
-            headers={'X-Emby-Token': api_key},
+            headers={'X-Emby-Token': api_key, 'Accept': 'application/json'},
             timeout=float(os.getenv('JELLYFIN_REFRESH_TIMEOUT', '10')),
         )
         response.raise_for_status()
