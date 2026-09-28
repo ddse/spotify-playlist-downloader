@@ -387,6 +387,17 @@ def test_move_completed_file_to_artist_album_updates_path_and_folder(tmp_path, m
     assert tuple(row) == ("Test artist/Test album", str(destination))
 
 
+def test_music_folders_lists_existing_directories(tmp_path, monkeypatch):
+    _, client = _client(tmp_path, monkeypatch)
+    music = tmp_path / "music"
+    (music / "Music" / "Chill").mkdir(parents=True)
+    (music / "Artist" / "Album").mkdir(parents=True)
+    monkeypatch.setenv("MUSIC_DIR", str(music))
+    response = client.get("/api/music/folders")
+    assert response.status_code == 200
+    assert response.json()["items"] == ["Artist", "Artist/Album", "Music", "Music/Chill"]
+
+
 def test_move_completed_file_to_custom_folder_is_safe(tmp_path, monkeypatch):
     connect, client = _client(tmp_path, monkeypatch)
     music = tmp_path / "music"
