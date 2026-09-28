@@ -52,7 +52,30 @@ async def test_connection(server_url: str, token: str) -> dict:
     }
 
 
-async def refresh_library(server_url: str, token: str) -> None:
+def refresh_library(server_or_connection, token: str = ""):
+    """Refresh Jellyfin, with backward-compatible settings-database support."""
+    if hasattr(server_or_connection, "execute"):
+        rows = server_or_connection.execute(
+            "SELECT key, value FROM app_settings WHERE key IN "
+            "('jellyfin_enabled','jellyfin_url','jellyfin_api_key')"
+        ).fetchall()
+        settings = {row["key"]: row["value"] for row in rows}
+        enabled = str(settings.get("jellyfin_enabled", "0")).lower() in {"1", "true", "yes", "on"}
+        server_url = (settings.get("jellyfin_url") or "").strip()
+        token = (settings.get("jellyfin_api_key") or "").strip()
+        if not enabled or not server_url or not token:
+            return {"ok": False, "skipped": True, "reason": "not_configured"}
+        try:
+            refresh_library_sync(server_url, token)
+            return {"ok": True, "skipped": False, "status_code": 200}
+        except Exception as exc:
+            return {"ok": False, "skipped": False, "reason": str(exc)}
+
+    refresh_library_sync(server_or_connection, token)
+    return {"ok": True, "skipped": False, "status_code": 200}
+
+
+async def refresh_library_async(server_url: str, token: str) -> None:
     """Ask Jellyfin to rescan its libraries after a new media file is ready."""
     base = _base_url(server_url)
     async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
