@@ -46,3 +46,24 @@ def test_new_audio_download_output_always_runs_validation(tmp_path):
     assert row["media_validation_version"] == worker.CURRENT_VALIDATION_VERSION
     assert row["media_validation_at"]
     c.close()
+
+
+
+def test_jellyfin_refresh_failure_is_non_fatal(monkeypatch):
+    from worker import jellyfin
+    import sqlite3
+    c = sqlite3.connect(':memory:')
+    c.row_factory = sqlite3.Row
+    c.execute("CREATE TABLE app_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    c.executemany("INSERT INTO app_settings(key,value) VALUES(?,?)", [
+        ("jellyfin_enabled","1"), ("jellyfin_url","http://jellyfin:8096"), ("jellyfin_api_key","token")
+    ])
+    c.commit()
+    def fail(*args, **kwargs):
+        raise RuntimeError("offline")
+    monkeypatch.setattr(jellyfin.httpx, "post", fail)
+    result = jellyfin.refresh_library(c)
+    assert result["ok"] is False
+    assert result["skipped"] is False
+    assert "offline" in result["reason"]
+    c.close()
