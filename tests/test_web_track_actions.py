@@ -360,3 +360,7 @@ def test_frontend_shows_media_validation_icon():
     assert "effectiveStatus==='valid'" in text
     assert "x.media_validation_status || (x.status==='completed'?'valid':'')" not in text
     assert "ValidationIcon status={x.media_validation_status}" in text
+    assert "function ValidationIcon({status,trackId,onLoad})" in text
+    assert "/api/tracks/validate?track_id=" in text
+    assert "Re-validate" in text
+    assert "onClick={revalidate}" in text
