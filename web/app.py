@@ -407,6 +407,8 @@ async def update_jellyfin_settings(request: Request):
     api_key = str(body.get('api_key') or '').strip()
     if not isinstance(enabled, bool):
         raise HTTPException(400, 'enabled must be a boolean')
+    if api_key == '********':
+        api_key = ''
     if enabled and (not url or not api_key):
         # Allow the masked value so the UI can save URL/enabled without
         # requiring the secret to be entered again.
