@@ -243,7 +243,7 @@ def test_zingmp3_invalid_json_is_reported(monkeypatch):
         assert str(exc) == "Zing MP3 returned invalid JSON"
 
 
-def test_search_wireguard_policy_is_mocked():
+def test_search_wireguard_policy_is_mocked(monkeypatch):
     import worker.search as module
     calls = []
 
@@ -251,15 +251,15 @@ def test_search_wireguard_policy_is_mocked():
         calls.append(enabled)
         return func()
 
-    module.manager.setting_enabled = lambda: False
-    module.manager.debug_status = lambda: {"status": "mock"}
-    module.manager.run = fake_run
-    module.PROVIDERS["zingmp3"] = (
+    monkeypatch.setattr(module.manager, "setting_enabled", lambda: False)
+    monkeypatch.setattr(module.manager, "debug_status", lambda: {"status": "mock"})
+    monkeypatch.setattr(module.manager, "run", fake_run)
+    monkeypatch.setitem(module.PROVIDERS, "zingmp3", (
         lambda *args: {"items": [{"id": "mock-z"}], "page": 1, "limit": 10, "has_more": False}
-    )
-    module.PROVIDERS["nhaccuatui"] = (
+    ))
+    monkeypatch.setitem(module.PROVIDERS, "nhaccuatui", (
         lambda *args: {"items": [{"id": "mock-n"}], "page": 1, "limit": 10, "has_more": False}
-    )
+    ))
 
     assert module.search("test", source="zingmp3", wireguard=True)["items"]
     assert module.search("test", source="nhaccuatui", wireguard=False)["items"]

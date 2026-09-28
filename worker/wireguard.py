@@ -215,7 +215,7 @@ def debug_status():
     try:
         current = status()
         return {
-            "requested_enabled": requested_enabled,
+            "requested_enabled": bool(_state),
             "interface": current.get("interface", INTERFACE),
             "config_exists": bool(current.get("config_exists")),
             "interface_up": bool(current.get("enabled")),

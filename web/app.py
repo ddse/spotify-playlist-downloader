@@ -375,6 +375,97 @@ async def wireguard_toggle(enabled: bool = Form(...)):
         }
 
 
+
+JELLYFIN_SETTING_KEYS = ('jellyfin_url', 'jellyfin_api_key', 'jellyfin_enabled')
+
+
+def jellyfin_settings():
+    c = db()
+    rows = c.execute(
+        "SELECT key,value FROM app_settings WHERE key IN ('jellyfin_url','jellyfin_api_key','jellyfin_enabled')"
+    ).fetchall()
+    c.close()
+    values = {row['key']: row['value'] for row in rows}
+    return {
+        'enabled': values.get('jellyfin_enabled', '0') == '1',
+        'url': values.get('jellyfin_url', ''),
+        'configured': bool(values.get('jellyfin_api_key')),
+        'api_key': '********' if values.get('jellyfin_api_key') else '',
+    }
+
+
+@app.get('/api/settings/jellyfin')
+def get_jellyfin_settings():
+    return jellyfin_settings()
+
+
+@app.put('/api/settings/jellyfin')
+async def update_jellyfin_settings(request: Request):
+    body = await request.json()
+    enabled = body.get('enabled')
+    url = str(body.get('url') or '').strip().rstrip('/')
+    api_key = str(body.get('api_key') or '').strip()
+    if not isinstance(enabled, bool):
+        raise HTTPException(400, 'enabled must be a boolean')
+    if enabled and (not url or not api_key):
+        # Allow the masked value so the UI can save URL/enabled without
+        # requiring the secret to be entered again.
+        c = db()
+        existing = c.execute(
+            "SELECT value FROM app_settings WHERE key='jellyfin_api_key'"
+        ).fetchone()
+        existing_key = existing['value'] if existing else ''
+        c.close()
+        if not api_key and existing_key:
+            api_key = existing_key
+        if not url or not api_key:
+            raise HTTPException(400, 'Jellyfin URL and API key are required when enabled')
+    elif not api_key:
+        c = db()
+        existing = c.execute(
+            "SELECT value FROM app_settings WHERE key='jellyfin_api_key'"
+        ).fetchone()
+        api_key = existing['value'] if existing else ''
+        c.close()
+
+    c = db()
+    for key, value in (
+        ('jellyfin_url', url),
+        ('jellyfin_api_key', api_key),
+        ('jellyfin_enabled', '1' if enabled else '0'),
+    ):
+        c.execute(
+            'INSERT INTO app_settings(key,value) VALUES(?,?) '
+            'ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+            (key, value),
+        )
+    c.commit()
+    c.close()
+    return {'ok': True, **jellyfin_settings()}
+
+
+@app.post('/api/settings/jellyfin/test')
+async def test_jellyfin_settings():
+    settings = jellyfin_settings()
+    if not settings['configured'] or not settings['url']:
+        return {'ok': False, 'status': 'not_configured', 'error': 'Jellyfin URL and API key are required'}
+    c = db()
+    row = c.execute(
+        "SELECT value FROM app_settings WHERE key='jellyfin_api_key'"
+    ).fetchone()
+    api_key = row['value'] if row else ''
+    c.close()
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                settings['url'].rstrip('/') + '/System/Info',
+                headers={'X-Emby-Token': api_key},
+            )
+            response.raise_for_status()
+        return {'ok': True, 'status': 'connected', 'server_name': response.json().get('ServerName', '')}
+    except Exception as exc:
+        return {'ok': False, 'status': 'error', 'error': str(exc)}
+
 @app.get('/api/settings/connections')
 def provider_connections():
     c=db(); items={p:provider_row(c,p) for p in PROVIDER_DEFAULTS}; c.close(); return {'items':items}
@@ -916,6 +1007,40 @@ def remove_file(track_id:str=Query(...)):
     return {'ok':True}
 
 @app.post('/api/retry')
+@app.post('/api/tracks/validate')
+async def validate_track_media(track_id: str = Query(...)):
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/media/validate",
+                params={"track_id": track_id},
+            )
+        if response.status_code >= 400:
+            raise HTTPException(response.status_code, response.text)
+        return response.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, f"worker media validation unavailable: {exc}")
+
+
+@app.post('/api/tracks/repair')
+async def repair_track_media(track_id: str = Query(...)):
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
+            response = await client.post(
+                f"{os.getenv('WORKER_ENDPOINT','http://worker:8090')}/api/media/repair",
+                params={"track_id": track_id},
+            )
+        if response.status_code >= 400:
+            raise HTTPException(response.status_code, response.text)
+        return response.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, f"worker media repair unavailable: {exc}")
+
+
 def retry(track_id:str=Query(...)):
     c=db()
     cur=c.execute(

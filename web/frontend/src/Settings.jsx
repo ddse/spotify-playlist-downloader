@@ -1,6 +1,6 @@
 import React, {useEffect, useState} from 'react';
 import {useLanguage} from './i18n';
-import {Settings2, X, KeyRound, Network, CheckCircle2, Clock3} from 'lucide-react';
+import {Settings2, X, KeyRound, Network, CheckCircle2, Clock3, Server} from 'lucide-react';
 
 async function api(path, opts={}) {
   const r=await fetch(path, opts);
@@ -31,9 +31,13 @@ export default function Settings({onClose}) {const {t}=useLanguage();
   const [togglingWireguard,setTogglingWireguard]=useState(false);
   const [scheduleEnabled,setScheduleEnabled]=useState(true);
   const [savingSchedule,setSavingSchedule]=useState(false);
+  const [jellyfin,setJellyfin]=useState({enabled:false,url:'',api_key:'',configured:false});
+  const [savingJellyfin,setSavingJellyfin]=useState(false);
+  const [testingJellyfin,setTestingJellyfin]=useState(false);
   useEffect(()=>{
     api('/api/settings/connections').then(d=>setItems(d.items||{})).catch(e=>setMessage(e.message));
     api('/api/settings/schedule').then(d=>setScheduleEnabled(d.enabled!==false)).catch(e=>setMessage(e.message));
+    api('/api/settings/jellyfin').then(setJellyfin).catch(e=>setMessage(e.message));
     const refreshWireguard=()=>api('/api/settings/wireguard').then(setWireguard).catch(e=>setWireguard(x=>({...x,status:'unavailable',status_detail:e.message})));
     refreshWireguard();
     const proto=location.protocol==='https:'?'wss':'ws';
@@ -87,6 +91,8 @@ export default function Settings({onClose}) {const {t}=useLanguage();
       setMessage(enabled?t('Subscription scheduling enabled'):t('Subscription scheduling disabled'));
     }catch(e){setMessage(e.message)} finally{setSavingSchedule(false)}
   };
+  const saveJellyfin=async()=>{setSavingJellyfin(true);setMessage('');try{const d=await api('/api/settings/jellyfin',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(jellyfin)});setJellyfin(d);setMessage('Jellyfin settings saved. API key is write-only.')}catch(e){setMessage(e.message)}finally{setSavingJellyfin(false)}};
+  const testJellyfin=async()=>{setTestingJellyfin(true);setMessage('');try{const d=await api('/api/settings/jellyfin/test',{method:'POST'});setMessage(d.ok?('Connected to '+(d.server_name||'Jellyfin')):(d.error||'Connection test failed'));}catch(e){setMessage(e.message)}finally{setTestingJellyfin(false)}};
   const test=async()=>{setTesting(true);setMessage('');try{const d=await api('/api/settings/connections/'+selected+'/test',{method:'POST'});setMessage(d.ok?'Connection test successful':(d.error||'Connection test failed'));setItems(x=>({...x,[selected]:{...x[selected],status:d.status,error:d.error||''}}));}catch(e){setMessage(e.message)}finally{setTesting(false)}};
   const currentConfigured=!!item.configured;
   const statusTone=item.status==='connected'||item.status==='ok'?'text-emerald-300':item.status==='error'?'text-red-300':'text-zinc-400';
@@ -100,9 +106,23 @@ export default function Settings({onClose}) {const {t}=useLanguage();
         <button type="button" onClick={()=>{setSelected('spotify');setMessage('')}} className="flex items-center gap-2 rounded-t-lg px-3 py-2 text-xs text-zinc-400 hover:text-zinc-200"><KeyRound size={14}/>{t('Providers')}</button>
         <button type="button" onClick={()=>{setSelected('wireguard');setMessage('')}} className="flex items-center gap-2 rounded-t-lg px-3 py-2 text-xs text-zinc-400 hover:text-zinc-200"><Network size={14}/>{t('WireGuard')}</button>
         <button type="button" onClick={()=>{setSelected('schedule');setMessage('')}} className="flex items-center gap-2 rounded-t-lg px-3 py-2 text-xs text-zinc-400 hover:text-zinc-200"><Clock3 size={14}/>{t('Schedule')}</button>
+        <button type="button" onClick={()=>{setSelected('jellyfin');setMessage('')}} className="flex items-center gap-2 rounded-t-lg px-3 py-2 text-xs text-zinc-400 hover:text-zinc-200"><Server size={14}/>{t('Jellyfin')}</button>
       </div></div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-5">
-        {selected==='schedule' ? <div className="space-y-4">
+        {selected==='jellyfin' ? <div className="space-y-4">
+          <div><h3 className="font-medium">{t('Jellyfin')}</h3><p className="mt-1 text-xs text-zinc-500">{t('Refresh the Jellyfin library automatically after a validated download.')}</p></div>
+          <div className="rounded-xl border border-white/10 bg-white/[.02] p-4 space-y-4">
+            <label className="flex items-center justify-between gap-3 text-sm"><span>{t('Enable Jellyfin refresh')}</span><input type="checkbox" checked={jellyfin.enabled} onChange={e=>setJellyfin(x=>({...x,enabled:e.target.checked}))}/></label>
+            <label><span className="mb-1.5 block text-[11px] text-zinc-500">{t('Jellyfin URL')}</span><input value={jellyfin.url||''} onChange={e=>setJellyfin(x=>({...x,url:e.target.value}))} placeholder="http://jellyfin:8096" className="w-full rounded-lg border border-white/10 bg-black/20 p-2.5 text-sm outline-none focus:border-violet-500"/></label>
+            <label><span className="mb-1.5 block text-[11px] text-zinc-500">{t('API key')}</span><input type="password" value={jellyfin.api_key||''} placeholder={jellyfin.configured?'Saved (write-only)':''} onChange={e=>setJellyfin(x=>({...x,api_key:e.target.value}))} className="w-full rounded-lg border border-white/10 bg-black/20 p-2.5 text-sm outline-none focus:border-violet-500"/></label>
+            <div className="text-[11px] text-zinc-500">{jellyfin.configured?t('Saved (write-only). The API key is never returned to the UI.'):t('Enter the Jellyfin API key once; it will not be displayed again.')}</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={saveJellyfin} disabled={savingJellyfin} className="rounded-lg bg-violet-600 px-3.5 py-2 text-xs font-medium text-white disabled:opacity-40">{savingJellyfin?t('Saving...'):t('Save changes')}</button>
+              <button onClick={testJellyfin} disabled={testingJellyfin||!jellyfin.configured} className="rounded-lg border border-white/10 px-3.5 py-2 text-xs">{testingJellyfin?t('Testing...'):t('Test connection')}</button>
+              {message&&<span className="text-xs text-zinc-400">{message}</span>}
+            </div>
+          </div>
+        </div> :
           <div><h3 className="font-medium">{t('Subscription schedule')}</h3><p className="mt-1 text-xs text-zinc-500">{t('Controls automatic background synchronization of enabled subscriptions.')}</p></div>
           <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[.02] p-4">
             <div><div className="text-sm font-medium">{t('Run subscription scheduler')}</div><div className="mt-1 text-xs text-zinc-500">{scheduleEnabled?t('Automatic synchronization is enabled.'):t('Automatic synchronization is off. No background subscription sync will run.')}</div></div>

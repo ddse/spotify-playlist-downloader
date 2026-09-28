@@ -347,3 +347,16 @@ def test_pagination_page_size_is_bounded_and_page_is_normalized(tmp_path, monkey
     payload = response.json()
     assert payload["page"] == 1
     assert payload["page_size"] == 100
+
+
+def test_frontend_shows_media_validation_icon():
+    source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
+    text = source.read_text(encoding="utf-8")
+    assert "ShieldCheck" in text
+    assert "function ValidationIcon" in text
+    assert "media_validation_status" in text
+    assert "Validated media" in text
+    assert "Media needs validation" in text
+    assert "status==='valid'" in text
+    assert "x.media_validation_status || (x.status==='completed'?'valid':'')" not in text
+    assert "ValidationIcon status={x.media_validation_status}" in text
