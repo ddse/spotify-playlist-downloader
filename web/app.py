@@ -1042,6 +1042,7 @@ async def repair_track_media(track_id: str = Query(...)):
         raise HTTPException(503, f"worker media repair unavailable: {exc}")
 
 
+@app.post('/api/retry')
 def retry(track_id:str=Query(...)):
     c=db()
     cur=c.execute(
