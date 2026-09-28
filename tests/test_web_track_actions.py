@@ -364,3 +364,101 @@ def test_frontend_shows_media_validation_icon():
     assert "/api/tracks/validate?track_id=" in text
     assert "Re-validate" in text
     assert "onClick={revalidate}" in text
+
+
+def test_move_completed_file_to_artist_album_updates_path_and_folder(tmp_path, monkeypatch):
+    connect, client = _client(tmp_path, monkeypatch)
+    music = tmp_path / "music"
+    source = music / "Old" / "Wrong" / "Song.mp3"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"fake mp3")
+    _seed(connect, "completed", str(source))
+
+    r = client.post("/api/tracks/move", params={"track_id": TRACK_ID}, data={"mode": "artist_album"})
+    assert r.status_code == 200
+    destination = music / "Test artist" / "Test album" / "Song.mp3"
+    assert destination.exists() and not source.exists()
+    payload = r.json()
+    assert payload["folder"] == "Test artist/Test album"
+
+    c = connect()
+    row = c.execute("SELECT download_folder,file_path FROM tracks WHERE spotify_id=?", (TRACK_ID,)).fetchone()
+    c.close()
+    assert tuple(row) == ("Test artist/Test album", str(destination))
+
+
+def test_move_completed_file_to_custom_folder_is_safe(tmp_path, monkeypatch):
+    connect, client = _client(tmp_path, monkeypatch)
+    music = tmp_path / "music"
+    source = music / "Artist" / "Album" / "Song.mp3"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"fake mp3")
+    _seed(connect, "completed", str(source))
+
+    r = client.post("/api/tracks/move", params={"track_id": TRACK_ID}, data={"mode": "folder", "folder": "Music/Chill"})
+    assert r.status_code == 200
+    destination = music / "Music" / "Chill" / "Song.mp3"
+    assert destination.exists() and not source.exists()
+
+    r = client.post("/api/tracks/move", params={"track_id": TRACK_ID}, data={"mode": "folder", "folder": "../outside"})
+    assert r.status_code == 400
+
+
+def test_move_completed_file_rejects_existing_target(tmp_path, monkeypatch):
+    connect, client = _client(tmp_path, monkeypatch)
+    music = tmp_path / "music"
+    source = music / "Artist" / "Album" / "Song.mp3"
+    target = music / "Test artist" / "Test album" / "Song.mp3"
+    source.parent.mkdir(parents=True)
+    target.parent.mkdir(parents=True)
+    source.write_bytes(b"source")
+    target.write_bytes(b"target")
+    _seed(connect, "completed", str(source))
+
+    r = client.post("/api/tracks/move", params={"track_id": TRACK_ID}, data={"mode": "artist_album"})
+    assert r.status_code == 409
+    assert source.exists() and target.read_bytes() == b"target"
+
+
+def test_move_completed_file_requires_confirmation_before_overwrite(tmp_path, monkeypatch):
+    music = tmp_path / "music"
+    source_dir = music / "Old"
+    target_dir = music / "Test artist" / "Test album"
+    source_dir.mkdir(parents=True)
+    target_dir.mkdir(parents=True)
+    source = source_dir / "Song.mp3"
+    target = target_dir / "Song.mp3"
+    source.write_bytes(b"new")
+    target.write_bytes(b"old")
+    connect, client = _client(tmp_path, monkeypatch)
+    monkeypatch.setenv("MUSIC_DIR", str(music))
+    _seed(connect, "completed", str(source))
+    track_id = TRACK_ID
+
+    response = client.post(
+        f"/api/tracks/move?track_id={track_id}",
+        data={"mode": "artist_album", "overwrite": "0"},
+    )
+    assert response.status_code == 409
+    assert source.read_bytes() == b"new"
+    assert target.read_bytes() == b"old"
+
+    response = client.post(
+        f"/api/tracks/move?track_id={track_id}",
+        data={"mode": "artist_album", "overwrite": "1"},
+    )
+    assert response.status_code == 200
+    assert target.read_bytes() == b"new"
+    assert not source.exists()
+
+
+def test_frontend_exposes_move_downloaded_file_action():
+    source = Path(__file__).resolve().parents[1] / "web" / "frontend" / "src" / "App.jsx"
+    text = source.read_text(encoding="utf-8")
+    assert "function MoveFileDialog" in text
+    assert "/api/tracks/move?track_id=" in text
+    assert "Artist / Album" in text
+    assert "Custom folder" in text
+    assert "Overwrite it?" in text
+    assert "overwrite:overwrite?'1':'0'" in text
+    assert "e.status=r.status" in text

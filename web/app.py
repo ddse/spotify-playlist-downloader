@@ -938,6 +938,73 @@ def update_track_title(track_id: str = Query(...), title: str = Form(...)):
     c.commit(); c.close()
     return {'ok': True, 'title': title, 'file_path': new_path}
 
+def _safe_music_path(music: Path, *parts: str) -> Path:
+    cleaned = [normalize_track_title(p, 'Unknown') for p in parts if str(p or '').strip()]
+    destination = (music.joinpath(*cleaned)).resolve()
+    if music != destination and music not in destination.parents:
+        raise HTTPException(400, 'invalid destination')
+    return destination
+
+@app.post('/api/tracks/move')
+def move_track(
+    track_id: str = Query(...),
+    mode: str = Form('artist_album'),
+    folder: str = Form(''),
+    overwrite: str = Form('0'),
+):
+    c = db()
+    row = c.execute("SELECT * FROM tracks WHERE spotify_id=?", (track_id,)).fetchone()
+    if not row:
+        c.close()
+        raise HTTPException(404, 'track not found')
+    if row['status'] != 'completed' or not (row['file_path'] or '').strip():
+        c.close()
+        raise HTTPException(409, 'only completed files can be moved')
+
+    music = Path(os.getenv('MUSIC_DIR', '/music')).resolve()
+    source = Path(row['file_path']).resolve()
+    if not source.is_file() or music not in source.parents:
+        c.close()
+        raise HTTPException(404, 'downloaded file not found')
+
+    if mode == 'artist_album':
+        destination_dir = _safe_music_path(music, row['artists'] or 'Unknown Artist', row['album'] or 'Unknown Album')
+    elif mode == 'artist':
+        destination_dir = _safe_music_path(music, row['artists'] or 'Unknown Artist')
+    elif mode == 'album':
+        destination_dir = _safe_music_path(music, row['album'] or 'Unknown Album')
+    elif mode == 'folder':
+        folder = os.path.normpath(folder.strip()) if folder.strip() else ''
+        if not folder or folder in ('.', '..', '/') or folder.startswith('../') or folder.startswith('..\\') or folder.startswith('/') or folder.startswith('\\'):
+            c.close()
+            raise HTTPException(400, 'invalid destination folder')
+        destination_dir = _safe_music_path(music, *Path(folder).parts)
+    else:
+        c.close()
+        raise HTTPException(400, 'unsupported move mode')
+
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / source.name
+    allow_overwrite = str(overwrite).lower() in {'1', 'true', 'yes', 'on'}
+    if destination != source:
+        if destination.exists() and not allow_overwrite:
+            c.close()
+            raise HTTPException(409, 'target file already exists; confirmation required')
+        if destination.exists():
+            try:
+                destination.unlink()
+            except OSError:
+                c.close()
+                raise HTTPException(409, 'target file exists and could not be replaced')
+        source.rename(destination)
+
+    c.execute(
+        "UPDATE tracks SET download_folder=?,file_path=?,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?",
+        (str(destination.relative_to(music).parent), str(destination), track_id),
+    )
+    c.commit(); c.close()
+    return {'ok': True, 'file_path': str(destination), 'folder': str(destination.relative_to(music).parent)}
+
 @app.post('/api/queue/start')
 def start_queue(track_id:str=Query(...)):
     c=db(); c.execute("UPDATE tracks SET auto_start=1,status=CASE WHEN status IN ('paused','queued') THEN 'queued' ELSE status END,updated_at=CURRENT_TIMESTAMP WHERE spotify_id=? AND status IN ('paused','queued')",(track_id,)); c.commit(); c.close(); return {'ok':True}
