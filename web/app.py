@@ -945,6 +945,24 @@ def _safe_music_path(music: Path, *parts: str) -> Path:
         raise HTTPException(400, 'invalid destination')
     return destination
 
+@app.get('/api/music/folders')
+def list_music_folders():
+    """Return existing folders under MUSIC_DIR for move/download selectors."""
+    music = Path(os.getenv('MUSIC_DIR', '/music')).resolve()
+    if not music.is_dir():
+        return {'items': []}
+    folders = set()
+    for path in music.rglob('*'):
+        if not path.is_dir():
+            continue
+        try:
+            relative = path.relative_to(music)
+        except ValueError:
+            continue
+        if relative.parts:
+            folders.add(relative.as_posix())
+    return {'items': sorted(folders, key=lambda value: (value.casefold(), value))}
+
 @app.post('/api/tracks/move')
 def move_track(
     track_id: str = Query(...),
