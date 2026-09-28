@@ -122,7 +122,7 @@ export default function Settings({onClose}) {const {t}=useLanguage();
               {message&&<span className="text-xs text-zinc-400">{message}</span>}
             </div>
           </div>
-        </div> :
+        </div> : selected==='schedule' ? <div className="space-y-4">
           <div><h3 className="font-medium">{t('Subscription schedule')}</h3><p className="mt-1 text-xs text-zinc-500">{t('Controls automatic background synchronization of enabled subscriptions.')}</p></div>
           <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[.02] p-4">
             <div><div className="text-sm font-medium">{t('Run subscription scheduler')}</div><div className="mt-1 text-xs text-zinc-500">{scheduleEnabled?t('Automatic synchronization is enabled.'):t('Automatic synchronization is off. No background subscription sync will run.')}</div></div>
