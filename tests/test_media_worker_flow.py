@@ -67,3 +67,92 @@ def test_jellyfin_refresh_failure_is_non_fatal(monkeypatch):
     assert result["skipped"] is False
     assert "offline" in result["reason"]
     c.close()
+
+
+def test_mp3_metadata_writer_uses_id3_tags(monkeypatch, tmp_path):
+    from worker import jellyfin
+
+    media = tmp_path / "song.mp3"
+    media.write_bytes(b"fake-mp3")
+
+    calls = []
+
+    class Result:
+        pass
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        temp = Path(command[-1])
+        temp.write_bytes(b"tagged-mp3")
+        return Result()
+
+    monkeypatch.setattr(jellyfin.subprocess, "run", fake_run)
+    jellyfin._write_mp3_metadata(str(media), "Song", "Artist", "Album")
+
+    assert media.read_bytes() == b"tagged-mp3"
+    command = calls[0][0]
+    assert "-id3v2_version" in command
+    assert "3" in command
+    assert "title=Song" in command
+    assert "artist=Artist" in command
+    assert "album=Album" in command
+
+
+def test_update_downloaded_item_uses_post_and_tolerates_mount_path(monkeypatch, tmp_path):
+    from worker import jellyfin
+
+    media = tmp_path / "Artist" / "Album" / "Song.mp3"
+    media.parent.mkdir(parents=True)
+    media.write_bytes(b"fake-mp3")
+
+    class Response:
+        def __init__(self, payload=None, status_code=200):
+            self._payload = payload or {}
+            self.status_code = status_code
+
+        def json(self):
+            return self._payload
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            self.posts = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, **kwargs):
+            assert kwargs["params"]["IncludeItemTypes"] == "Audio"
+            return Response({
+                "Items": [{
+                    "Id": "item-1",
+                    "Path": "/jellyfin/music/Artist/Album/Song.mp3",
+                    "ProviderIds": {},
+                }],
+                "TotalRecordCount": 1,
+            })
+
+        def post(self, url, **kwargs):
+            self.posts.append((url, kwargs))
+            return Response()
+
+    monkeypatch.setattr(jellyfin, "_write_mp3_metadata", lambda *args: None)
+    client = Client()
+    monkeypatch.setattr(jellyfin.httpx, "Client", lambda *args, **kwargs: client)
+
+    item_id = jellyfin.update_downloaded_item(
+        "http://jellyfin:8096",
+        "token",
+        str(media),
+        "Song",
+        "Artist",
+        "Album",
+        "track-1",
+    )
+
+    assert item_id == "item-1"
+    assert client.posts[0][0].endswith("/Items/item-1")
+    assert client.posts[0][1]["json"]["Name"] == "Song"
+    assert client.posts[0][1]["json"]["ProviderIds"]["MusicDownloader"] == "track-1"
