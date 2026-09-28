@@ -10,9 +10,9 @@ except ImportError:  # pragma: no cover
 from yt_dlp.utils import DownloadError
 
 try:
-    from .jellyfin import refresh_library as refresh_jellyfin_library
+    from .jellyfin import refresh_library_sync as jellyfin_refresh_library, update_downloaded_item
 except ImportError:  # pragma: no cover
-    from jellyfin import refresh_library as refresh_jellyfin_library
+    from jellyfin import refresh_library_sync as jellyfin_refresh_library, update_downloaded_item
 
 try:
     from . import wireguard as manager
@@ -230,6 +230,47 @@ def format_eta(seconds):
         return f'{seconds}s'
     return f'{seconds // 60}:{seconds % 60:02d}'
 
+
+
+def jellyfin_config(c):
+    row = c.execute("SELECT enabled,config_json FROM provider_connections WHERE provider='jellyfin'").fetchone()
+    if not row or not row['enabled']:
+        return None
+    try:
+        import json
+        cfg = json.loads(row['config_json'] or '{}')
+    except Exception:
+        return None
+    return cfg if cfg.get('server_url') and cfg.get('api_token') else None
+
+
+def jellyfin_media_path(file_path):
+    source = Path(file_path).resolve()
+    music_root = Path(MUSIC_DIR).resolve()
+    prefix = os.getenv('JELLYFIN_MEDIA_PREFIX', '/media').strip().rstrip('/') or '/media'
+    try:
+        relative = source.relative_to(music_root)
+    except ValueError:
+        return str(source)
+    return f"{prefix}/{relative.as_posix()}"
+
+
+def notify_jellyfin(c, track_id, file_path):
+    cfg = jellyfin_config(c)
+    if not cfg:
+        return
+    c.execute("UPDATE tracks SET jellyfin_status='syncing',jellyfin_error='',jellyfin_updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?", (track_id,))
+    c.commit()
+    row = c.execute("SELECT title,artists,album FROM tracks WHERE spotify_id=?", (track_id,)).fetchone()
+    try:
+        jellyfin_refresh_library(cfg['server_url'], cfg['api_token'])
+        item_id = update_downloaded_item(cfg['server_url'], cfg['api_token'], jellyfin_media_path(file_path), row['title'], row['artists'], row['album'], track_id)
+        c.execute("UPDATE tracks SET jellyfin_status='synced',jellyfin_item_id=?,jellyfin_error='',jellyfin_updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?", (item_id, track_id))
+        c.commit()
+    except Exception as exc:
+        c.execute("UPDATE tracks SET jellyfin_status='failed',jellyfin_error=?,jellyfin_updated_at=CURRENT_TIMESTAMP WHERE spotify_id=?", (str(exc)[-4000:], track_id))
+        c.commit()
+        logger.warning('Jellyfin metadata sync failed track=%s error=%s', track_id, exc)
 
 def heartbeat(c, detail='idle'):
     c.execute(
@@ -735,7 +776,7 @@ def run_worker():
                     )
                     if c.execute("SELECT changes()").fetchone()[0] != 1:
                         raise RuntimeError('media validation did not complete successfully')
-                    refresh_jellyfin_library(c)
+                    notify_jellyfin(c, track_id, file_path)
                 except Exception as e:
                     logger.exception('download job failed track=%s', track_id)
                     err = format_error(e, getattr(e, 'logs', ''))

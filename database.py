@@ -29,6 +29,10 @@ TRACK_BASE_COLUMNS = {
     'wireguard': 'INTEGER DEFAULT 0',
     'file_path': "TEXT DEFAULT ''",
     'title_override': 'INTEGER DEFAULT 0',
+    'jellyfin_status': "TEXT DEFAULT 'not_synced'",
+    'jellyfin_item_id': "TEXT DEFAULT ''",
+    'jellyfin_error': "TEXT DEFAULT ''",
+    'jellyfin_updated_at': "TEXT",
     'media_validation_status': "TEXT NOT NULL DEFAULT 'unchecked'",
     'media_validation_at': 'TEXT',
     'media_validation_version': 'INTEGER NOT NULL DEFAULT 0',
@@ -84,7 +88,11 @@ def init_db(c=None):
         eta TEXT DEFAULT '',
         wireguard INTEGER DEFAULT 0,
         file_path TEXT DEFAULT '',
-        title_override INTEGER DEFAULT 0
+        title_override INTEGER DEFAULT 0,
+        jellyfin_status TEXT DEFAULT 'not_synced',
+        jellyfin_item_id TEXT DEFAULT '',
+        jellyfin_error TEXT DEFAULT '',
+        jellyfin_updated_at TEXT
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS provider_connections(
         provider TEXT PRIMARY KEY,
